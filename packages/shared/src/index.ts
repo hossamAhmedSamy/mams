@@ -38,8 +38,13 @@ export const NOTIFICATION_TYPES = [
   "stage_completed",
   "project_completed",
   "comment_added",
+  "expense_requested",
+  "expense_decided",
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
+
+export const EXPENSE_STATUSES = ["pending", "approved", "rejected"] as const;
+export type ExpenseStatus = (typeof EXPENSE_STATUSES)[number];
 
 // ---------------------------------------------------------------------------
 // Task state machine (PLAN.md §5.3) — the only legal transitions.
@@ -94,12 +99,17 @@ export const zPassword = z.string().min(10, "At least 10 characters").max(128);
 // ---------------------------------------------------------------------------
 
 export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
-  waiting: "Waiting",
-  todo: "To do",
+  waiting: "Not started",
+  todo: "Ready to start",
   in_progress: "In progress",
-  awaiting_approval: "Awaiting approval",
+  awaiting_approval: "Needs approval",
   done: "Done",
 };
+
+export function formatMoney(amount: number | string): string {
+  const n = typeof amount === "string" ? Number(amount) : amount;
+  return `${CURRENCY} ${n.toLocaleString("en-EG", { maximumFractionDigits: 2 })}`;
+}
 
 export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
   active: "Active",

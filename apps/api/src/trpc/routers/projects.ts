@@ -1,4 +1,4 @@
-import { zDateISO, zHttpsUrl, zPriority, zProjectStatus } from "@mams/shared";
+import { zDateISO, zHttpsUrl, zMoney, zPriority, zProjectStatus } from "@mams/shared";
 import { z } from "zod";
 import * as projectService from "../../services/project-service";
 import { adminProcedure, protectedProcedure, router } from "../trpc";
@@ -31,6 +31,7 @@ export const projectsRouter = router({
         dueDate: zDateISO.optional(),
         driveLink: zHttpsUrl.optional(),
         notes: z.string().max(5000).optional(),
+        budget: zMoney.optional(),
         workflowTemplateId: z.uuid().optional(),
         firstAssigneeId: z.string().optional(),
       }),
@@ -48,6 +49,7 @@ export const projectsRouter = router({
         dueDate: zDateISO.nullable().optional(),
         driveLink: zHttpsUrl.nullable().optional(),
         notes: z.string().max(5000).nullable().optional(),
+        budget: zMoney.nullable().optional(),
       }),
     )
     .mutation(({ ctx, input }) => projectService.updateProject(ctx.user, input)),

@@ -1,16 +1,19 @@
 import { schema } from "@mams/db";
 import { and, isNull, lte, sql } from "drizzle-orm";
 import { db } from "../db";
+import { env } from "../env";
+import { todayISO } from "../lib/time";
+import { postDueRecurring } from "../services/finance-service";
 
 /**
  * Idempotent job runner (PLAN.md §6). Called by BOTH the in-process 60s
  * ticker and the external cron's POST /jobs/tick — overlap-safe by
  * construction (FOR UPDATE SKIP LOCKED + job_runs markers).
  *
- * M0/M1 scope: fires due reminders as in-app notifications. Email delivery
- * and the daily digest/overdue sweep land in M4.
+ * Fires due reminders + once-a-day jobs (recurring expense posting). Email
+ * delivery and the daily digest/overdue sweep land in M4.
  */
-export async function runDueJobs(): Promise<{ remindersFired: number }> {
+export async function runDueJobs(): Promise<{ remindersFired: number; recurringPosted: number }> {
   let remindersFired = 0;
 
   await db.transaction(async (tx) => {
@@ -45,7 +48,22 @@ export async function runDueJobs(): Promise<{ remindersFired: number }> {
     }
   });
 
-  return { remindersFired };
+  const recurringPosted = (await claimDailyJob("recurring_expenses")) ? await postDueRecurring() : 0;
+
+  return { remindersFired, recurringPosted };
+}
+
+/**
+ * Once-per-business-day marker via job_runs. Returns true for exactly one
+ * caller per (job, Cairo day), no matter how many ticks fire.
+ */
+async function claimDailyJob(jobName: string): Promise<boolean> {
+  const rows = await db
+    .insert(schema.jobRuns)
+    .values({ jobName, runOn: todayISO(env.TZ_BUSINESS) })
+    .onConflictDoNothing()
+    .returning();
+  return rows.length > 0;
 }
 
 /** In-process ticker — runs while the service is warm. */

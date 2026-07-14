@@ -1,17 +1,35 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ExternalLink } from "lucide-react";
+import { Check, ExternalLink, Flag, Lock } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardBody } from "@/components/ui/card";
 import { EmptyState, ErrorBanner, SkeletonRows } from "@/components/ui/feedback";
 import { Select } from "@/components/ui/input";
-import { PageHeader } from "@/components/ui/page";
+import { Avatar, PageHeader } from "@/components/ui/page";
 import { TaskActionButton } from "@/components/task-action";
 import { DeadlineChip, PriorityDot, StatusBadge } from "@/components/task-bits";
+import { formatShort } from "@/lib/dates";
 import { useTRPC } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { useMe } from "./app-layout";
+import { LedgerTab } from "./project-ledger";
+
+type ProjectTask = {
+  id: string;
+  title: string;
+  status: string;
+  chainPosition: number | null;
+  deadline: string | null;
+  startDate: string | null;
+  flagged: boolean;
+  requiresApproval: boolean;
+  assigneeId: string | null;
+  assigneeName: string | null;
+  stageName: string | null;
+  checklist: { text: string; done: boolean }[] | null;
+  driveLink: string | null;
+};
 
 export function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -19,7 +37,7 @@ export function ProjectDetailPage() {
   const me = useMe();
   const queryClient = useQueryClient();
   const project = useQuery(trpc.projects.get.queryOptions({ id: id! }));
-  const [tab, setTab] = useState<"tasks" | "activity">("tasks");
+  const [tab, setTab] = useState<"work" | "activity" | "money">("work");
 
   const setStatus = useMutation(
     trpc.projects.setStatus.mutationOptions({
@@ -38,8 +56,15 @@ export function ProjectDetailPage() {
 
   const p = project.data;
   const isAdmin = me.data?.role === "admin";
-  const chain = p.tasks.filter((t) => t.chainPosition !== null);
-  const adhoc = p.tasks.filter((t) => t.chainPosition === null);
+  const chain = (p.tasks as ProjectTask[]).filter((t) => t.chainPosition !== null);
+  const adhoc = (p.tasks as ProjectTask[]).filter((t) => t.chainPosition === null);
+  const doneCount = chain.filter((t) => t.status === "done").length;
+
+  const tabs: { key: "work" | "activity" | "money"; label: string }[] = [
+    { key: "work", label: "Work" },
+    { key: "activity", label: "Activity" },
+    ...(isAdmin ? [{ key: "money" as const, label: "Money" }] : []),
+  ];
 
   return (
     <div className="space-y-6">
@@ -82,87 +107,151 @@ export function ProjectDetailPage() {
         {p.notes && <p className="-mt-3 max-w-2xl text-sm text-gray-600">{p.notes}</p>}
       </div>
 
-      {chain.length > 0 && <ChainStepper chain={chain} isAdmin={isAdmin ?? false} />}
-
       <div className="flex gap-1 border-b border-gray-200">
-        {(["tasks", "activity"] as const).map((t) => (
+        {tabs.map((t) => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
+            key={t.key}
+            onClick={() => setTab(t.key)}
             className={cn(
-              "border-b-2 px-4 py-2 text-sm font-medium capitalize",
-              tab === t
+              "border-b-2 px-4 py-2.5 text-sm font-medium",
+              tab === t.key
                 ? "border-accent-600 text-accent-700"
                 : "border-transparent text-gray-500 hover:text-gray-700",
             )}
           >
-            {t}
+            {t.label}
           </button>
         ))}
       </div>
 
-      {tab === "tasks" ? (
-        <div className="space-y-2">
-          {p.tasks.length === 0 && (
+      {tab === "work" && (
+        <div className="space-y-8">
+          {chain.length > 0 ? (
+            <section>
+              <div className="mb-3 flex items-baseline justify-between">
+                <h2 className="text-sm font-semibold text-gray-700">The flow</h2>
+                <span className="text-xs text-gray-400">
+                  {doneCount}/{chain.length} stages done
+                </span>
+              </div>
+              <Pipeline chain={chain} isAdmin={isAdmin ?? false} viewer={me.data!} />
+            </section>
+          ) : (
             <Card>
-              <EmptyState title="No tasks" hint="This project has no workflow or tasks yet." />
+              <EmptyState
+                title="No flow on this project"
+                hint="Tasks are added by hand — see below."
+              />
             </Card>
           )}
-          {[...chain, ...adhoc].map((task) => (
-            <TaskRow key={task.id} task={task} viewer={me.data!} />
-          ))}
+
+          {adhoc.length > 0 && (
+            <section>
+              <h2 className="mb-3 text-sm font-semibold text-gray-700">Extra tasks</h2>
+              <div className="space-y-2">
+                {adhoc.map((task) => (
+                  <AdhocTaskRow key={task.id} task={task} viewer={me.data!} />
+                ))}
+              </div>
+            </section>
+          )}
         </div>
-      ) : (
-        <ActivityList entityType="project" entityId={p.id} />
       )}
+
+      {tab === "activity" && <ActivityList entityType="project" entityId={p.id} />}
+      {tab === "money" && isAdmin && <LedgerTab projectId={p.id} />}
     </div>
   );
 }
 
-function ChainStepper({
+// ---------------------------------------------------------------------------
+// The pipeline: vertical, phone-first, plain language. The current stage is
+// the big card; done stages collapse; future stages explain when they start.
+// ---------------------------------------------------------------------------
+
+function Pipeline({
   chain,
   isAdmin,
+  viewer,
 }: {
-  chain: {
-    id: string;
-    title: string;
-    status: string;
-    stageName: string | null;
-    assigneeId: string | null;
-    assigneeName: string | null;
-    deadline: string | null;
-  }[];
+  chain: ProjectTask[];
   isAdmin: boolean;
+  viewer: { id: string; role: "admin" | "member" };
 }) {
+  const currentIdx = chain.findIndex((t) => t.status !== "done");
   return (
-    <Card>
-      <CardBody className="overflow-x-auto">
-        <ol className="flex min-w-max items-start gap-0">
-          {chain.map((task, i) => (
-            <li key={task.id} className="flex items-start">
-              {i > 0 && <div className="mx-2 mt-4 h-px w-8 bg-gray-200" />}
-              <StepperNode task={task} isAdmin={isAdmin} />
-            </li>
-          ))}
-        </ol>
-      </CardBody>
-    </Card>
+    <ol>
+      {chain.map((task, i) => {
+        const isDone = task.status === "done";
+        const isCurrent = i === currentIdx;
+        const isLast = i === chain.length - 1;
+        return (
+          <li key={task.id} className="relative flex gap-3 sm:gap-4">
+            {/* rail */}
+            <div className="flex w-8 flex-col items-center">
+              <span
+                className={cn(
+                  "z-10 flex size-8 shrink-0 items-center justify-center rounded-full border-2 text-xs font-bold",
+                  isDone
+                    ? "border-status-done bg-status-done text-white"
+                    : isCurrent
+                      ? "border-accent-600 bg-white text-accent-700 ring-4 ring-accent-100"
+                      : "border-gray-200 bg-white text-gray-300",
+                )}
+              >
+                {isDone ? <Check size={15} strokeWidth={3} /> : i + 1}
+              </span>
+              {!isLast && (
+                <span
+                  className={cn("w-0.5 flex-1", isDone ? "bg-status-done/40" : "bg-gray-200")}
+                />
+              )}
+            </div>
+
+            {/* card */}
+            <div className={cn("min-w-0 flex-1", isLast ? "pb-0" : "pb-3")}>
+              {isCurrent ? (
+                <CurrentStageCard task={task} isAdmin={isAdmin} viewer={viewer} />
+              ) : (
+                <Link
+                  to={`/tasks/${task.id}`}
+                  className={cn(
+                    "flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-white px-4 py-3 transition-colors hover:border-gray-300",
+                    isDone ? "border-gray-100" : "border-gray-100 opacity-70",
+                  )}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className={cn("font-medium", isDone ? "text-gray-500" : "text-gray-600")}>
+                      {task.title}
+                    </span>
+                    {task.requiresApproval && <Lock size={12} className="text-amber-500" />}
+                    {task.flagged && <Flag size={12} className="text-status-flagged" />}
+                  </div>
+                  <span className="text-xs text-gray-400">
+                    {isDone
+                      ? `Done${task.assigneeName ? ` by ${task.assigneeName}` : ""}`
+                      : task.assigneeName
+                        ? `${task.assigneeName} · starts after ${chain[i - 1]?.title ?? "previous stage"}`
+                        : `starts after ${chain[i - 1]?.title ?? "previous stage"}`}
+                  </span>
+                </Link>
+              )}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
-function StepperNode({
+function CurrentStageCard({
   task,
   isAdmin,
+  viewer,
 }: {
-  task: {
-    id: string;
-    title: string;
-    status: string;
-    assigneeId: string | null;
-    assigneeName: string | null;
-    deadline: string | null;
-  };
+  task: ProjectTask;
   isAdmin: boolean;
+  viewer: { id: string; role: "admin" | "member" };
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -172,73 +261,87 @@ function StepperNode({
       onSettled: () => queryClient.invalidateQueries({ queryKey: trpc.projects.pathKey() }),
     }),
   );
-
-  const done = task.status === "done";
-  const active = task.status === "todo" || task.status === "in_progress" || task.status === "awaiting_approval";
+  const checklistDone = task.checklist?.filter((c) => c.done).length ?? 0;
 
   return (
-    <div className="flex w-32 flex-col items-center text-center">
-      <Link
-        to={`/tasks/${task.id}`}
-        className={cn(
-          "flex size-8 items-center justify-center rounded-full border-2 text-xs font-semibold",
-          done
-            ? "border-status-done bg-status-done text-white"
-            : active
-              ? "border-accent-600 bg-accent-50 text-accent-700"
-              : "border-gray-300 bg-white text-gray-400",
-        )}
-      >
-        {done ? <Check size={15} /> : ""}
-      </Link>
-      <Link to={`/tasks/${task.id}`} className="mt-1 text-xs font-medium text-gray-800">
-        {task.title}
-      </Link>
-      {active && task.deadline && (
-        <div className="mt-0.5">
-          <DeadlineChip deadline={task.deadline} />
+    <div
+      className={cn(
+        "rounded-xl border-2 bg-white p-4 shadow-card",
+        task.flagged ? "border-orange-300" : "border-accent-200",
+      )}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Link to={`/tasks/${task.id}`} className="flex items-center gap-2">
+          <span className="text-base font-semibold text-gray-900">{task.title}</span>
+          <StatusBadge status={task.status as never} />
+        </Link>
+        <DeadlineChip deadline={task.deadline} />
+      </div>
+
+      {task.flagged && (
+        <p className="mt-2 rounded-lg bg-orange-50 px-3 py-1.5 text-xs text-orange-700">
+          ⚑ Needs attention — check the task page
+        </p>
+      )}
+
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          {isAdmin ? (
+            <Select
+              className="h-8 w-40 text-xs"
+              value={task.assigneeId ?? ""}
+              disabled={assign.isPending}
+              onChange={(e) => assign.mutate({ id: task.id, assigneeId: e.target.value || null })}
+            >
+              <option value="">Unassigned</option>
+              {users.data
+                ?.filter((u) => u.active)
+                .map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name}
+                  </option>
+                ))}
+            </Select>
+          ) : task.assigneeName ? (
+            <span className="flex items-center gap-2 text-sm text-gray-700">
+              <Avatar name={task.assigneeName} size="sm" /> {task.assigneeName}
+            </span>
+          ) : (
+            <span className="text-sm text-gray-400">Waiting for assignment</span>
+          )}
+          {task.checklist && task.checklist.length > 0 && (
+            <span className="text-xs text-gray-400">
+              ☑ {checklistDone}/{task.checklist.length}
+            </span>
+          )}
+          {task.driveLink && (
+            <a href={task.driveLink} target="_blank" rel="noreferrer" className="text-accent-600">
+              <ExternalLink size={14} />
+            </a>
+          )}
         </div>
-      )}
-      {/* waiting-stage pre-assignment: this dropdown IS the pre-assignment UI */}
-      {isAdmin && !done ? (
-        <Select
-          className="mt-1 h-7 w-full text-xs"
-          value={task.assigneeId ?? ""}
-          disabled={assign.isPending}
-          onChange={(e) => assign.mutate({ id: task.id, assigneeId: e.target.value || null })}
-        >
-          <option value="">Unassigned</option>
-          {users.data
-            ?.filter((u) => u.active)
-            .map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name}
-              </option>
-            ))}
-        </Select>
-      ) : (
-        <span className="mt-0.5 text-xs text-gray-500">{task.assigneeName ?? "—"}</span>
-      )}
+        <TaskActionButton
+          task={{
+            id: task.id,
+            title: task.title,
+            status: task.status as never,
+            assigneeId: task.assigneeId,
+            requiresApproval: task.requiresApproval,
+            chainPosition: task.chainPosition,
+          }}
+          viewer={viewer}
+          size="md"
+        />
+      </div>
     </div>
   );
 }
 
-function TaskRow({
+function AdhocTaskRow({
   task,
   viewer,
 }: {
-  task: {
-    id: string;
-    title: string;
-    status: string;
-    chainPosition: number | null;
-    deadline: string | null;
-    flagged: boolean;
-    requiresApproval: boolean;
-    assigneeId: string | null;
-    assigneeName: string | null;
-    stageName: string | null;
-  };
+  task: ProjectTask;
   viewer: { id: string; role: "admin" | "member" };
 }) {
   return (
@@ -246,16 +349,11 @@ function TaskRow({
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
         <Link to={`/tasks/${task.id}`} className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            {task.chainPosition !== null && (
-              <span className="text-xs font-semibold text-gray-400">#{task.chainPosition}</span>
-            )}
             <span className="font-medium text-gray-900">{task.title}</span>
             <StatusBadge status={task.status as never} />
             {task.flagged && <Badge tone="orange">Flagged</Badge>}
           </div>
-          <p className="mt-0.5 text-sm text-gray-500">
-            {task.assigneeName ?? "Unassigned"}
-          </p>
+          <p className="mt-0.5 text-sm text-gray-500">{task.assigneeName ?? "Unassigned"}</p>
         </Link>
         <div className="flex shrink-0 items-center gap-3">
           <DeadlineChip deadline={task.deadline} />
@@ -328,20 +426,30 @@ function describeAction(action: string, detail: Record<string, unknown> | null):
   switch (action) {
     case "created":
       return "created this";
+    case "requested":
+      return "requested an expense";
+    case "approved":
+      return "approved the expense";
+    case "rejected":
+      return "rejected the expense";
+    case "recurring_posted":
+      return `posted a recurring expense (${detail?.name ?? ""})`;
     case "status_changed":
       return `moved ${detail?.from ?? "?"} → ${detail?.to ?? "?"}`;
     case "assigned":
-      return "changed the assignee";
+      return "changed the owner";
+    case "helpers_changed":
+      return "updated the helpers";
     case "deadline_changed":
       return `set the deadline to ${detail?.to ?? "none"}`;
     case "handoff":
-      return `handed off (${detail?.route ?? "?"})`;
+      return `handed off (${detail?.route === "same_person" ? "same person kept it" : detail?.route === "pre_assigned" ? "pre-assigned" : "needs assignment"})`;
     case "flagged":
       return "flagged this";
     case "unflagged":
       return "removed the flag";
     case "reverted_to_waiting":
-      return "reverted to waiting (predecessor reopened)";
+      return "moved back to Not started (previous stage reopened)";
     case "reopen_conflict":
       return "reopen conflict — needs untangling";
     case "assignment_cleared":
@@ -353,4 +461,24 @@ function describeAction(action: string, detail: Record<string, unknown> | null):
     default:
       return action.replaceAll("_", " ");
   }
+}
+
+/** Progress bar used by ledger + money screens. */
+export function BudgetBar({ spent, budget }: { spent: number; budget: number | null }) {
+  if (!budget || budget <= 0) return null;
+  const pct = Math.min(100, Math.round((spent / budget) * 100));
+  const over = spent > budget;
+  return (
+    <div className="w-full">
+      <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
+        <div
+          className={cn("h-full rounded-full", over ? "bg-status-overdue" : pct > 80 ? "bg-status-due-soon" : "bg-status-done")}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <p className={cn("mt-1 text-xs", over ? "font-medium text-status-overdue" : "text-gray-400")}>
+        {pct}% of budget{over ? " — over!" : ""}
+      </p>
+    </div>
+  );
 }

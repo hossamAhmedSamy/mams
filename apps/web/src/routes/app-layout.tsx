@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { CalendarDays, ClipboardList, LayoutGrid, LogOut, Settings } from "lucide-react";
+import { CalendarDays, ClipboardList, LayoutGrid, LogOut, Receipt, Settings, Wallet } from "lucide-react";
 import { Navigate, NavLink, Outlet, useNavigate } from "react-router";
 import { Skeleton } from "@/components/ui/feedback";
 import { Avatar } from "@/components/ui/page";
@@ -44,7 +44,12 @@ export function AppLayout() {
     { to: "/my-work", label: "My Work", icon: ClipboardList },
     { to: "/board", label: "Board", icon: LayoutGrid },
     { to: "/calendar", label: "Calendar", icon: CalendarDays },
-    ...(isAdmin ? [{ to: "/settings/users", label: "Settings", icon: Settings }] : []),
+    ...(isAdmin
+      ? [
+          { to: "/money", label: "Money", icon: Wallet },
+          { to: "/settings/users", label: "Settings", icon: Settings },
+        ]
+      : [{ to: "/expenses", label: "Expenses", icon: Receipt }]),
   ];
 
   return (

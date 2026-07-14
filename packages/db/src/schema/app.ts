@@ -113,6 +113,7 @@ export const projects = pgTable(
     priority: text("priority").notNull().default("medium"),
     status: text("status").notNull().default("active"),
     workflowTemplateId: uuid("workflow_template_id").references(() => workflowTemplates.id),
+    budget: numeric("budget", { precision: 12, scale: 2 }),
     startDate: date("start_date"),
     dueDate: date("due_date"),
     driveLink: text("drive_link"),
@@ -284,13 +285,31 @@ export const expenseCategories = pgTable("expense_categories", {
   active: boolean("active").notNull().default(true),
 });
 
+/**
+ * Recurring money: salaries, rent, subscriptions. The daily job materializes
+ * one approved overhead expense per period; last_posted_period ('YYYY-MM')
+ * makes posting idempotent across restarts and free-tier spin-downs.
+ */
+export const recurringExpenses = pgTable("recurring_expenses", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  categoryId: uuid("category_id")
+    .notNull()
+    .references(() => expenseCategories.id),
+  dayOfMonth: integer("day_of_month").notNull().default(1),
+  userId: text("user_id").references(() => user.id), // set for salaries
+  active: boolean("active").notNull().default(true),
+  lastPostedPeriod: text("last_posted_period"),
+  createdBy: text("created_by").references(() => user.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const expenses = pgTable(
   "expenses",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    projectId: uuid("project_id")
-      .notNull()
-      .references(() => projects.id),
+    projectId: uuid("project_id").references(() => projects.id), // null = agency overhead
     categoryId: uuid("category_id")
       .notNull()
       .references(() => expenseCategories.id),
@@ -299,13 +318,23 @@ export const expenses = pgTable(
     note: text("note"),
     vendor: text("vendor"),
     receiptLink: text("receipt_link"),
+    // approval flow: members request (pending), admin decides; admin-created
+    // and recurring-posted rows are born approved
+    status: text("status").notNull().default("approved"),
+    decidedBy: text("decided_by").references(() => user.id),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decisionNote: text("decision_note"),
+    recurringId: uuid("recurring_id").references(() => recurringExpenses.id),
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index("expenses_project_id_idx").on(t.projectId),
     index("expenses_category_date_idx").on(t.categoryId, t.spentOn),
+    index("expenses_status_idx").on(t.status),
+    index("expenses_created_by_idx").on(t.createdBy),
     check("expenses_amount_check", sql`${t.amount} > 0`),
+    check("expenses_status_check", sql`${t.status} IN ('pending','approved','rejected')`),
   ],
 );
 

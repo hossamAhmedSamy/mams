@@ -217,6 +217,7 @@ function CreateProjectCard({ onDone }: { onDone: () => void }) {
   const [campaign, setCampaign] = useState("");
   const [priority, setPriority] = useState<"high" | "medium" | "low">("medium");
   const [dueDate, setDueDate] = useState("");
+  const [budget, setBudget] = useState("");
   const [templateId, setTemplateId] = useState("");
   const [firstAssigneeId, setFirstAssigneeId] = useState("");
   const [driveLink, setDriveLink] = useState("");
@@ -252,6 +253,7 @@ function CreateProjectCard({ onDone }: { onDone: () => void }) {
         priority,
         dueDate: dueDate || undefined,
         driveLink: driveLink || undefined,
+        budget: budget ? Number(budget) : undefined,
         workflowTemplateId: templateId || undefined,
         firstAssigneeId: firstAssigneeId || undefined,
         startDate: todayISO(),
@@ -317,6 +319,17 @@ function CreateProjectCard({ onDone }: { onDone: () => void }) {
               type="date"
               value={dueDate}
               onChange={(e) => setDueDate(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label htmlFor="p-budget">Budget (EGP, optional)</Label>
+            <Input
+              id="p-budget"
+              type="number"
+              min={0}
+              placeholder="e.g. 20000"
+              value={budget}
+              onChange={(e) => setBudget(e.target.value)}
             />
           </div>
           <div>

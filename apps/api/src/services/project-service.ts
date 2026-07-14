@@ -136,6 +136,7 @@ export async function createProject(
     dueDate?: string;
     driveLink?: string;
     notes?: string;
+    budget?: number;
     workflowTemplateId?: string;
     firstAssigneeId?: string;
   },
@@ -152,6 +153,7 @@ export async function createProject(
         dueDate: input.dueDate ?? null,
         driveLink: input.driveLink ?? null,
         notes: input.notes ?? null,
+        budget: input.budget !== undefined ? String(input.budget) : null,
         workflowTemplateId: input.workflowTemplateId ?? null,
         createdBy: actor.id,
       })
@@ -240,10 +242,15 @@ export async function updateProject(
     dueDate?: string | null;
     driveLink?: string | null;
     notes?: string | null;
+    budget?: number | null;
   },
 ) {
   return db.transaction(async (tx) => {
-    const { id, ...fields } = input;
+    const { id, budget, ...rest } = input;
+    const fields = {
+      ...rest,
+      ...(budget !== undefined ? { budget: budget === null ? null : String(budget) } : {}),
+    };
     const [row] = await tx.update(projects).set(fields).where(eq(projects.id, id)).returning();
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
     await logActivity(tx, {

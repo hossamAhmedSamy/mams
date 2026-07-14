@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { EmptyState, ErrorBanner, SkeletonRows } from "@/components/ui/feedback";
 import { PageHeader } from "@/components/ui/page";
+import { MiniCalendar } from "@/components/mini-calendar";
 import { TaskActionButton } from "@/components/task-action";
 import { DeadlineChip, StatusBadge } from "@/components/task-bits";
 import { addDaysISO } from "@/lib/dates";
@@ -78,43 +79,53 @@ export function MyWorkPage() {
   ];
 
   return (
-    <div className="space-y-6">
-      <PageHeader title="My Work" subtitle="Everything assigned to you, next action first" />
+    <div>
+      <PageHeader title="My Work" subtitle="Your calendar and everything assigned to you" />
 
-      {open.length === 0 && (
-        <Card>
-          <EmptyState title="Nothing assigned. 🎉" hint="New tasks will land here automatically." />
-        </Card>
-      )}
+      <div className="grid gap-6 lg:grid-cols-3">
+        {/* calendar is part of the landing (owner request 2026-07-15) —
+            first on mobile, right rail on desktop */}
+        <div className="order-first lg:order-last lg:col-span-1">
+          <MiniCalendar />
+        </div>
 
-      {sections.map(
-        (section) =>
-          section.items.length > 0 && (
-            <section key={section.title}>
-              <h2 className={`mb-2 text-sm font-semibold ${section.accent ?? "text-gray-700"}`}>
-                {section.title} · {section.items.length}
-              </h2>
-              <div className="space-y-2">
-                {section.items.map((task) => (
-                  <TaskCard key={task.id} task={task} today={today} viewer={me.data!} />
+        <div className="space-y-6 lg:col-span-2">
+          {open.length === 0 && (
+            <Card>
+              <EmptyState title="Nothing assigned. 🎉" hint="New tasks will land here automatically." />
+            </Card>
+          )}
+
+          {sections.map(
+            (section) =>
+              section.items.length > 0 && (
+                <section key={section.title}>
+                  <h2 className={`mb-2 text-sm font-semibold ${section.accent ?? "text-gray-700"}`}>
+                    {section.title} · {section.items.length}
+                  </h2>
+                  <div className="space-y-2">
+                    {section.items.map((task) => (
+                      <TaskCard key={task.id} task={task} today={today} viewer={me.data!} />
+                    ))}
+                  </div>
+                </section>
+              ),
+          )}
+
+          {done.length > 0 && (
+            <details>
+              <summary className="cursor-pointer text-sm font-medium text-gray-500">
+                Done in the last 7 days · {done.length}
+              </summary>
+              <div className="mt-2 space-y-2">
+                {done.map((task) => (
+                  <TaskCard key={task.id} task={task} today={today} viewer={me.data!} muted />
                 ))}
               </div>
-            </section>
-          ),
-      )}
-
-      {done.length > 0 && (
-        <details>
-          <summary className="cursor-pointer text-sm font-medium text-gray-500">
-            Done in the last 7 days · {done.length}
-          </summary>
-          <div className="mt-2 space-y-2">
-            {done.map((task) => (
-              <TaskCard key={task.id} task={task} today={today} viewer={me.data!} muted />
-            ))}
-          </div>
-        </details>
-      )}
+            </details>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

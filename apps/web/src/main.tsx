@@ -13,6 +13,8 @@ import { ChangePasswordPage } from "@/routes/change-password";
 import { HomeRedirect } from "@/routes/home-redirect";
 import { LoginPage } from "@/routes/login";
 import { BoardPage } from "@/routes/board";
+import { ExpensesPage } from "@/routes/expenses";
+import { MoneyPage } from "@/routes/money";
 import { MyWorkPage } from "@/routes/my-work";
 import { ProjectDetailPage } from "@/routes/project-detail";
 import { UsersSettingsPage } from "@/routes/settings-users";
@@ -40,6 +42,8 @@ const router = createBrowserRouter([
       { path: "/my-work", element: <MyWorkPage /> },
       { path: "/board", element: <BoardPage /> },
       { path: "/calendar", element: <CalendarPage /> },
+      { path: "/money", element: <MoneyPage /> },
+      { path: "/expenses", element: <ExpensesPage /> },
       { path: "/projects/:id", element: <ProjectDetailPage /> },
       { path: "/tasks/:id", element: <TaskDetailPage /> },
       { path: "/settings/users", element: <UsersSettingsPage /> },
