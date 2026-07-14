@@ -1,0 +1,19 @@
+{
+  "name": "mams",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @mams/api --filter @mams/web dev",
+    "build": "pnpm --filter @mams/shared build && pnpm --filter @mams/db build && pnpm --filter @mams/api build && pnpm --filter @mams/web build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "db:up": "docker compose up -d db",
+    "db:migrate": "pnpm --filter @mams/db migrate",
+    "db:seed": "pnpm --filter @mams/db seed"
+  }
+}

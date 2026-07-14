@@ -1,0 +1,20 @@
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: mams-db
+    environment:
+      POSTGRES_USER: mams
+      POSTGRES_PASSWORD: mams
+      POSTGRES_DB: mams
+    ports:
+      - "5433:5432"
+    volumes:
+      - mams-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mams"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  mams-pgdata:

@@ -1,0 +1,21 @@
+{
+  "name": "@mams/shared",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "echo 'source package - no build'",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo ok",
+    "test": "echo 'no tests'"
+  },
+  "dependencies": {
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
