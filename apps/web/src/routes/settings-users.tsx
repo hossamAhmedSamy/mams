@@ -1,13 +1,41 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { UserPlus } from "lucide-react";
 import { useState } from "react";
+import { NavLink } from "react-router";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState, ErrorBanner, SkeletonRows } from "@/components/ui/feedback";
 import { Input, Label, Select } from "@/components/ui/input";
+import { Avatar, PageHeader } from "@/components/ui/page";
 import { useTRPC } from "@/lib/trpc";
+import { cn } from "@/lib/utils";
 import { useMe } from "./app-layout";
+
+export function SettingsTabs({ current }: { current: "team" | "workflows" }) {
+  const tabs = [
+    { key: "team", label: "Team", to: "/settings/users" },
+    { key: "workflows", label: "Workflows", to: "/settings/workflows" },
+  ] as const;
+  return (
+    <div className="flex gap-1 border-b border-gray-200">
+      {tabs.map((t) => (
+        <NavLink
+          key={t.key}
+          to={t.to}
+          className={cn(
+            "border-b-2 px-4 py-2.5 text-sm font-medium",
+            current === t.key
+              ? "border-accent-600 text-accent-700"
+              : "border-transparent text-gray-500 hover:text-gray-700",
+          )}
+        >
+          {t.label}
+        </NavLink>
+      ))}
+    </div>
+  );
+}
 
 export function UsersSettingsPage() {
   const trpc = useTRPC();
@@ -16,17 +44,18 @@ export function UsersSettingsPage() {
   const [showCreate, setShowCreate] = useState(false);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-gray-900">Team</h1>
-          <p className="text-sm text-gray-500">Accounts, roles, and skills</p>
-        </div>
-        <Button onClick={() => setShowCreate(true)}>
-          <UserPlus size={16} /> Add member
-        </Button>
-      </div>
-
+    <div>
+      <PageHeader
+        title="Settings"
+        subtitle="Team accounts, roles, and skills"
+        actions={
+          <Button onClick={() => setShowCreate(true)}>
+            <UserPlus size={16} /> Add member
+          </Button>
+        }
+      />
+      <SettingsTabs current="team" />
+      <div className="mt-6 space-y-6">
       {showCreate && <CreateUserCard onDone={() => setShowCreate(false)} />}
 
       <Card>
@@ -49,6 +78,7 @@ export function UsersSettingsPage() {
           </ul>
         )}
       </Card>
+      </div>
     </div>
   );
 }
@@ -74,7 +104,9 @@ function UserRow({ user, isSelf }: { user: UserItem; isSelf: boolean }) {
   return (
     <li className="px-5 py-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-3">
+          <Avatar name={user.name} />
+          <div className="min-w-0">
           <div className="flex items-center gap-2">
             <p className="truncate font-medium text-gray-900">{user.name}</p>
             {user.role === "admin" && <Badge tone="accent">Admin</Badge>}
@@ -88,6 +120,7 @@ function UserRow({ user, isSelf }: { user: UserItem; isSelf: boolean }) {
             ) : (
               user.skills.map((s) => <Badge key={s.id}>{s.name}</Badge>)
             )}
+          </div>
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">

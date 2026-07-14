@@ -14,9 +14,33 @@ import {
   scheduleStageAutoReminder,
 } from "./reminder-service";
 
-const { tasks, projects, clients, stages, user } = schema;
+const { tasks, projects, clients, stages, user, taskAssignees } = schema;
 
 type Actor = { id: string; role: "admin" | "member"; name: string };
+
+/** Owner or helper? (tasks.assignee_id is always mirrored into task_assignees) */
+async function isOnTask(dbc: typeof db, taskId: string, userId: string) {
+  const [row] = await dbc
+    .select({ userId: taskAssignees.userId })
+    .from(taskAssignees)
+    .where(and(eq(taskAssignees.taskId, taskId), eq(taskAssignees.userId, userId)))
+    .limit(1);
+  return !!row;
+}
+
+/** Helpers (non-owner assignees) with names, for a set of tasks. */
+async function helpersFor(taskIds: string[]) {
+  if (taskIds.length === 0) return [];
+  return db
+    .select({
+      taskId: taskAssignees.taskId,
+      userId: taskAssignees.userId,
+      name: user.name,
+    })
+    .from(taskAssignees)
+    .innerJoin(user, eq(taskAssignees.userId, user.id))
+    .where(inArray(taskAssignees.taskId, taskIds));
+}
 
 // ---------------------------------------------------------------------------
 // Queries
@@ -52,17 +76,42 @@ function taskListQuery() {
     .leftJoin(user, eq(tasks.assigneeId, user.id));
 }
 
-/** My Work (PLAN.md §8.2): open tasks + last 7 days of done, for one person. */
+/** My Work (PLAN.md §8.2): open tasks + last 7 days of done — owner OR helper. */
 export async function myWork(userId: string) {
   const weekAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000);
   const rows = await taskListQuery()
+    .innerJoin(
+      taskAssignees,
+      and(eq(taskAssignees.taskId, tasks.id), eq(taskAssignees.userId, userId)),
+    )
     .where(
-      and(
-        eq(tasks.assigneeId, userId),
-        sql`(${tasks.status} IN ('todo','in_progress','awaiting_approval') OR (${tasks.status} = 'done' AND ${tasks.completedAt} >= ${weekAgo}))`,
-      ),
+      sql`(${tasks.status} IN ('todo','in_progress','awaiting_approval') OR (${tasks.status} = 'done' AND ${tasks.completedAt} >= ${weekAgo}))`,
     )
     .orderBy(sql`${tasks.deadline} ASC NULLS LAST`);
+  return { today: todayISO(env.TZ_BUSINESS), tasks: rows };
+}
+
+/**
+ * Calendar feed: open tasks overlapping [from, to] by their start→deadline
+ * span (tasks without a deadline are excluded — nothing to place on a day).
+ * Members see their own; admin sees everyone (optionally one person).
+ */
+export async function calendar(viewer: Actor, input: { from: string; to: string; userId?: string }) {
+  const conds = [
+    isNotNull(tasks.deadline),
+    inArray(tasks.status, ["todo", "in_progress", "awaiting_approval"]),
+    sql`COALESCE(${tasks.startDate}, ${tasks.deadline}) <= ${input.to}`,
+    gte(tasks.deadline, input.from),
+  ];
+  const scopeUser = viewer.role === "admin" ? input.userId : viewer.id;
+  let query = taskListQuery();
+  if (scopeUser) {
+    query = query.innerJoin(
+      taskAssignees,
+      and(eq(taskAssignees.taskId, tasks.id), eq(taskAssignees.userId, scopeUser)),
+    ) as typeof query;
+  }
+  const rows = await query.where(and(...conds)).orderBy(sql`${tasks.deadline} ASC`);
   return { today: todayISO(env.TZ_BUSINESS), tasks: rows };
 }
 
@@ -103,7 +152,15 @@ export async function getTask(id: string) {
   const [row] = await taskListQuery().where(eq(tasks.id, id));
   if (!row) throw new TRPCError({ code: "NOT_FOUND" });
   const [full] = await db.select().from(tasks).where(eq(tasks.id, id));
-  return { ...row, details: full!.details, createdAt: full!.createdAt, activatedAt: full!.activatedAt, completedAt: full!.completedAt };
+  const helpers = (await helpersFor([id])).filter((h) => h.userId !== row.assigneeId);
+  return {
+    ...row,
+    details: full!.details,
+    createdAt: full!.createdAt,
+    activatedAt: full!.activatedAt,
+    completedAt: full!.completedAt,
+    helpers: helpers.map((h) => ({ id: h.userId, name: h.name })),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -130,8 +187,9 @@ export async function transition(taskId: string, to: TaskStatus, actor: Actor) {
 
     // --- object-level authorization (PLAN.md §3) ---------------------------
     if (actor.role !== "admin") {
+      const onTask = task.assigneeId === actor.id || (await isOnTask(db, taskId, actor.id));
       const memberAllowed =
-        task.assigneeId === actor.id &&
+        onTask &&
         ((from === "todo" && target === "in_progress") ||
           (from === "in_progress" && (target === "done" || target === "awaiting_approval")));
       if (!memberAllowed) throw new TRPCError({ code: "FORBIDDEN" });
@@ -276,6 +334,12 @@ export async function createAdhocTask(
         createdBy: actor.id,
       })
       .returning();
+    if (input.assigneeId) {
+      await tx
+        .insert(taskAssignees)
+        .values({ taskId: row!.id, userId: input.assigneeId })
+        .onConflictDoNothing();
+    }
     await logActivity(tx, {
       actorId: actor.id,
       entityType: "task",
@@ -307,6 +371,18 @@ export async function assign(actor: Actor, input: { id: string; assigneeId: stri
       }
     }
     await tx.update(tasks).set({ assigneeId: input.assigneeId }).where(eq(tasks.id, input.id));
+    // keep task_assignees mirrored: old owner off (helpers stay), new owner on
+    if (task.assigneeId && task.assigneeId !== input.assigneeId) {
+      await tx
+        .delete(taskAssignees)
+        .where(and(eq(taskAssignees.taskId, input.id), eq(taskAssignees.userId, task.assigneeId)));
+    }
+    if (input.assigneeId) {
+      await tx
+        .insert(taskAssignees)
+        .values({ taskId: input.id, userId: input.assigneeId })
+        .onConflictDoNothing();
+    }
     await logActivity(tx, {
       actorId: actor.id,
       entityType: "task",
@@ -335,6 +411,62 @@ export async function assign(actor: Actor, input: { id: string; assigneeId: stri
             stage.reminderRule,
           );
         }
+      }
+    }
+  });
+}
+
+/** Replace the helper set (owner is managed by assign(), never touched here). */
+export async function setHelpers(actor: Actor, input: { id: string; userIds: string[] }) {
+  return db.transaction(async (tx) => {
+    const [task] = await tx.select().from(tasks).where(eq(tasks.id, input.id)).for("update");
+    if (!task) throw new TRPCError({ code: "NOT_FOUND" });
+    const helperIds = [...new Set(input.userIds)].filter((id) => id !== task.assigneeId);
+    if (helperIds.length > 0) {
+      const activeUsers = await tx
+        .select({ id: user.id })
+        .from(user)
+        .where(and(inArray(user.id, helperIds), eq(user.banned, false)));
+      if (activeUsers.length !== helperIds.length) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "All helpers must be active users" });
+      }
+    }
+    const existing = await tx
+      .select({ userId: taskAssignees.userId })
+      .from(taskAssignees)
+      .where(eq(taskAssignees.taskId, input.id));
+    const keep = new Set([...(task.assigneeId ? [task.assigneeId] : []), ...helperIds]);
+    const toRemove = existing.map((e) => e.userId).filter((id) => !keep.has(id));
+    const existingSet = new Set(existing.map((e) => e.userId));
+    const toAdd = helperIds.filter((id) => !existingSet.has(id));
+
+    if (toRemove.length > 0) {
+      await tx
+        .delete(taskAssignees)
+        .where(and(eq(taskAssignees.taskId, input.id), inArray(taskAssignees.userId, toRemove)));
+    }
+    if (toAdd.length > 0) {
+      await tx
+        .insert(taskAssignees)
+        .values(toAdd.map((userId) => ({ taskId: input.id, userId })))
+        .onConflictDoNothing();
+    }
+    await logActivity(tx, {
+      actorId: actor.id,
+      entityType: "task",
+      entityId: input.id,
+      action: "helpers_changed",
+      detail: { helpers: helperIds },
+    });
+    for (const userId of toAdd) {
+      if (userId !== actor.id && task.status !== "waiting") {
+        await notifyUser(tx, userId, {
+          type: "task_assigned",
+          title: `You were added to: ${task.title}`,
+          body: task.deadline ? `Due ${task.deadline}` : undefined,
+          entityType: "task",
+          entityId: input.id,
+        });
       }
     }
   });
@@ -442,23 +574,23 @@ export async function deleteTask(actor: Actor, id: string) {
 // Assignee-or-admin mutations (object-level check)
 // ---------------------------------------------------------------------------
 
-function assertCanTouch(task: { assigneeId: string | null }, actor: Actor) {
-  if (actor.role !== "admin" && task.assigneeId !== actor.id) {
-    throw new TRPCError({ code: "FORBIDDEN" });
-  }
+async function assertCanTouch(taskId: string, task: { assigneeId: string | null }, actor: Actor) {
+  if (actor.role === "admin" || task.assigneeId === actor.id) return;
+  if (await isOnTask(db, taskId, actor.id)) return;
+  throw new TRPCError({ code: "FORBIDDEN" });
 }
 
 export async function updateChecklist(actor: Actor, input: { id: string; checklist: Checklist }) {
   const [task] = await db.select().from(tasks).where(eq(tasks.id, input.id));
   if (!task) throw new TRPCError({ code: "NOT_FOUND" });
-  assertCanTouch(task, actor);
+  await assertCanTouch(input.id, task, actor);
   await db.update(tasks).set({ checklist: input.checklist }).where(eq(tasks.id, input.id));
 }
 
 export async function setDriveLink(actor: Actor, input: { id: string; driveLink: string | null }) {
   const [task] = await db.select().from(tasks).where(eq(tasks.id, input.id));
   if (!task) throw new TRPCError({ code: "NOT_FOUND" });
-  assertCanTouch(task, actor);
+  await assertCanTouch(input.id, task, actor);
   await db.update(tasks).set({ driveLink: input.driveLink }).where(eq(tasks.id, input.id));
   await logActivity(db, {
     actorId: actor.id,

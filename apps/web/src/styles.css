@@ -3,10 +3,11 @@
 /* MAMS visual system (PLAN.md §8.1): neutral grays + one indigo accent.
    Status colors are the only other color in the app. */
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
 
   --color-accent-50: #eef2ff;
   --color-accent-100: #e0e7ff;
+  --color-accent-200: #c7d2fe;
   --color-accent-500: #6366f1;
   --color-accent-600: #4f46e5;
   --color-accent-700: #4338ca;
@@ -17,9 +18,20 @@
   --color-status-done: #16a34a;
   --color-status-waiting: #9ca3af;
   --color-status-flagged: #ea580c;
+
+  --shadow-card: 0 1px 2px 0 rgb(16 24 40 / 0.06), 0 1px 3px 0 rgb(16 24 40 / 0.1);
+}
+
+html {
+  font-size: 15px;
 }
 
 body {
-  @apply bg-gray-50 text-gray-900 antialiased;
-  font-feature-settings: "tnum";
+  @apply bg-slate-50 text-gray-900 antialiased;
+  font-feature-settings: "tnum", "cv11";
+  letter-spacing: -0.011em;
+}
+
+::selection {
+  @apply bg-accent-100 text-accent-700;
 }

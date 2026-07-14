@@ -1,11 +1,14 @@
+import "@fontsource-variable/inter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router";
+import { Toaster } from "sonner";
 import type { AppRouter } from "@api/trpc/routers/index";
 import { TRPCProvider } from "@/lib/trpc";
 import { AppLayout } from "@/routes/app-layout";
+import { CalendarPage } from "@/routes/calendar";
 import { ChangePasswordPage } from "@/routes/change-password";
 import { HomeRedirect } from "@/routes/home-redirect";
 import { LoginPage } from "@/routes/login";
@@ -13,6 +16,7 @@ import { BoardPage } from "@/routes/board";
 import { MyWorkPage } from "@/routes/my-work";
 import { ProjectDetailPage } from "@/routes/project-detail";
 import { UsersSettingsPage } from "@/routes/settings-users";
+import { WorkflowsSettingsPage } from "@/routes/settings-workflows";
 import { TaskDetailPage } from "@/routes/task-detail";
 import "./styles.css";
 
@@ -35,9 +39,11 @@ const router = createBrowserRouter([
       { path: "/", element: <HomeRedirect /> },
       { path: "/my-work", element: <MyWorkPage /> },
       { path: "/board", element: <BoardPage /> },
+      { path: "/calendar", element: <CalendarPage /> },
       { path: "/projects/:id", element: <ProjectDetailPage /> },
       { path: "/tasks/:id", element: <TaskDetailPage /> },
       { path: "/settings/users", element: <UsersSettingsPage /> },
+      { path: "/settings/workflows", element: <WorkflowsSettingsPage /> },
     ],
   },
 ]);
@@ -47,6 +53,7 @@ createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
       <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
         <RouterProvider router={router} />
+        <Toaster position="top-center" richColors closeButton />
       </TRPCProvider>
     </QueryClientProvider>
   </StrictMode>,

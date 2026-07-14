@@ -172,6 +172,24 @@ export const tasks = pgTable(
   ],
 );
 
+/**
+ * Everyone working the task (owner + helpers). tasks.assignee_id stays the ONE
+ * accountable owner and is always mirrored here; extra rows are helpers who
+ * see the task in My Work and may act on it.
+ */
+export const taskAssignees = pgTable(
+  "task_assignees",
+  {
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.taskId, t.userId] }), index("task_assignees_user_idx").on(t.userId)],
+);
+
 export const comments = pgTable(
   "comments",
   {

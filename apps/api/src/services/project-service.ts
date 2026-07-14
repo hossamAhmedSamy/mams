@@ -205,6 +205,10 @@ export async function createProject(
         })
         .returning();
       if (isFirst && assigneeId) {
+        await tx
+          .insert(schema.taskAssignees)
+          .values({ taskId: task!.id, userId: assigneeId })
+          .onConflictDoNothing();
         await scheduleStageAutoReminder(
           tx,
           { id: task!.id, assigneeId, deadline, title: task!.title },

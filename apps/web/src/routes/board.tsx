@@ -8,8 +8,10 @@ import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState, ErrorBanner, SkeletonRows } from "@/components/ui/feedback";
 import { Input, Label, Select } from "@/components/ui/input";
 import { PriorityDot } from "@/components/task-bits";
+import { PageHeader } from "@/components/ui/page";
 import { formatShort, todayISO } from "@/lib/dates";
 import { useTRPC } from "@/lib/trpc";
+import { cn } from "@/lib/utils";
 import { useMe } from "./app-layout";
 
 export function BoardPage() {
@@ -36,17 +38,17 @@ export function BoardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-gray-900">Projects</h1>
-          <p className="text-sm text-gray-500">Where everything stands</p>
-        </div>
-        {isAdmin && (
-          <Button onClick={() => setShowCreate((v) => !v)}>
-            <Plus size={16} /> New project
-          </Button>
-        )}
-      </div>
+      <PageHeader
+        title="Projects"
+        subtitle="Where everything stands"
+        actions={
+          isAdmin && (
+            <Button onClick={() => setShowCreate((v) => !v)}>
+              <Plus size={16} /> New project
+            </Button>
+          )
+        }
+      />
 
       {showCreate && <CreateProjectCard onDone={() => setShowCreate(false)} />}
 
@@ -98,7 +100,45 @@ export function BoardPage() {
             hint={isAdmin ? "Create your first project to get the board moving." : "Nothing here yet."}
           />
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          {/* phone: card list (quick glance on location, mid-work) */}
+          <ul className="divide-y divide-gray-100 sm:hidden">
+            {filtered.map((p) => (
+              <li key={p.id}>
+                <Link
+                  to={`/projects/${p.id}`}
+                  className={cn("block px-4 py-3 active:bg-gray-50", p.isLate && "border-l-[3px] border-red-500")}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-gray-900">{p.title}</span>
+                    {p.dueDate && (
+                      <span className={cn("shrink-0 text-xs", p.isLate ? "font-semibold text-red-600" : "text-gray-400")}>
+                        {formatShort(p.dueDate)}
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-0.5 text-xs text-gray-500">
+                    {p.clientName}
+                    {p.campaign ? ` · ${p.campaign}` : ""}
+                  </p>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                    <PriorityDot priority={p.priority as "high" | "medium" | "low"} />
+                    {p.status === "completed" ? (
+                      <Badge tone="green">Completed</Badge>
+                    ) : p.currentStage ? (
+                      <Badge tone="accent">{p.currentStage}</Badge>
+                    ) : null}
+                    <span className="text-xs text-gray-400">
+                      {p.stagesTotal > 0 ? `${p.stagesDone}/${p.stagesTotal} stages` : ""}
+                      {p.currentAssignee ? ` · ${p.currentAssignee}` : ""}
+                    </span>
+                  </div>
+                </Link>
+              </li>
+            ))}
+          </ul>
+          {/* desktop: table */}
+          <div className="hidden overflow-x-auto sm:block">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 text-left text-xs uppercase tracking-wide text-gray-400">
@@ -157,6 +197,7 @@ export function BoardPage() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </Card>
     </div>
@@ -296,11 +337,13 @@ function CreateProjectCard({ onDone }: { onDone: () => void }) {
               onChange={(e) => setTemplateId(e.target.value)}
             >
               <option value="">No template (ad-hoc tasks)</option>
-              {templates.data?.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
+              {templates.data
+                ?.filter((t) => t.active)
+                .map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
             </Select>
             {selectedTemplate && (
               <p className="mt-1 text-xs text-gray-500">

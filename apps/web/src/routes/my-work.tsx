@@ -1,11 +1,12 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Flag, Link2, MessageSquare } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Flag, Link2 } from "lucide-react";
 import { Link } from "react-router";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState, ErrorBanner, SkeletonRows } from "@/components/ui/feedback";
-import { DeadlineChip, nextAction, StatusBadge } from "@/components/task-bits";
+import { PageHeader } from "@/components/ui/page";
+import { TaskActionButton } from "@/components/task-action";
+import { DeadlineChip, StatusBadge } from "@/components/task-bits";
 import { addDaysISO } from "@/lib/dates";
 import { useTRPC } from "@/lib/trpc";
 import { useMe } from "./app-layout";
@@ -14,6 +15,7 @@ type MyTask = {
   id: string;
   title: string;
   status: "waiting" | "todo" | "in_progress" | "awaiting_approval" | "done";
+  chainPosition: number | null;
   deadline: string | null;
   flagged: boolean;
   flagNote: string | null;
@@ -34,7 +36,7 @@ export function MyWorkPage() {
   if (work.isPending)
     return (
       <div>
-        <h1 className="mb-4 text-xl font-semibold text-gray-900">My Work</h1>
+        <PageHeader title="My Work" subtitle="Everything assigned to you, next action first" />
         <Card>
           <SkeletonRows rows={5} />
         </Card>
@@ -77,10 +79,7 @@ export function MyWorkPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold text-gray-900">My Work</h1>
-        <p className="text-sm text-gray-500">Everything assigned to you, next action first</p>
-      </div>
+      <PageHeader title="My Work" subtitle="Everything assigned to you, next action first" />
 
       {open.length === 0 && (
         <Card>
@@ -131,14 +130,6 @@ function TaskCard({
   viewer: { id: string; role: "admin" | "member" };
   muted?: boolean;
 }) {
-  const trpc = useTRPC();
-  const queryClient = useQueryClient();
-  const transition = useMutation(
-    trpc.tasks.transition.mutationOptions({
-      onSettled: () => queryClient.invalidateQueries({ queryKey: trpc.tasks.pathKey() }),
-    }),
-  );
-  const action = muted ? null : nextAction(task, viewer);
   const checklistDone = task.checklist?.filter((c) => c.done).length ?? 0;
 
   return (
@@ -178,15 +169,7 @@ function TaskCard({
         </Link>
         <div className="flex shrink-0 items-center gap-3">
           <DeadlineChip deadline={task.deadline} today={today} muted={muted} />
-          {action && (
-            <Button
-              size="sm"
-              disabled={transition.isPending}
-              onClick={() => transition.mutate({ id: task.id, to: action.to })}
-            >
-              {action.label}
-            </Button>
-          )}
+          {!muted && <TaskActionButton task={task} viewer={viewer} />}
         </div>
       </div>
     </Card>

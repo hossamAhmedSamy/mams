@@ -132,6 +132,49 @@ describe("handoff routing (PLAN.md §4.1)", () => {
   });
 });
 
+describe("multi-assign (owner + helpers)", () => {
+  it("RULE B falls through to a helper with the right skill when the owner has none", async () => {
+    const { project, shootingId } = await projectAtShooting(gandoz); // owner: videographer only
+    await taskService.setHelpers(adham, { id: shootingId, userIds: [sama.id] }); // helper: editor
+    await completeTask(shootingId, gandoz);
+    const editing = (await chainOf(project.id))[2]!;
+    expect(editing.status).toBe("todo");
+    expect(editing.assigneeId).toBe(sama.id); // helper picked up the next stage
+  });
+
+  it("owner with the skill wins over a helper with the same skill", async () => {
+    const { project, shootingId } = await projectAtShooting(hazem); // owner: video + editor
+    await taskService.setHelpers(adham, { id: shootingId, userIds: [sama.id] });
+    await completeTask(shootingId, hazem);
+    const editing = (await chainOf(project.id))[2]!;
+    expect(editing.assigneeId).toBe(hazem.id); // owner priority
+  });
+
+  it("a helper can start and complete the task; owner mirror stays intact", async () => {
+    const { shootingId } = await projectAtShooting(gandoz);
+    await taskService.setHelpers(adham, { id: shootingId, userIds: [sama.id] });
+    await taskService.transition(shootingId, "in_progress", sama); // helper acts
+    const task = await taskById(shootingId);
+    expect(task.status).toBe("in_progress");
+    expect(task.assigneeId).toBe(gandoz.id); // ownership unchanged
+  });
+
+  it("non-assignee member still cannot act", async () => {
+    const { shootingId } = await projectAtShooting(gandoz);
+    await expect(taskService.transition(shootingId, "in_progress", sama)).rejects.toThrow();
+  });
+
+  it("changing the owner keeps helpers and updates the mirror", async () => {
+    const { shootingId } = await projectAtShooting(gandoz);
+    await taskService.setHelpers(adham, { id: shootingId, userIds: [sama.id] });
+    await taskService.assign(adham, { id: shootingId, assigneeId: hazem.id });
+    const work = await taskService.myWork(sama.id); // helper still sees it
+    expect(work.tasks.some((t) => t.id === shootingId)).toBe(true);
+    const gone = await taskService.myWork(gandoz.id); // old owner no longer does
+    expect(gone.tasks.some((t) => t.id === shootingId)).toBe(false);
+  });
+});
+
 describe("reopen (PLAN.md §4.3)", () => {
   it("untouched successor reverts to waiting; auto deadline cleared; reminder canceled", async () => {
     const { project, shootingId } = await projectAtShooting(hazem);

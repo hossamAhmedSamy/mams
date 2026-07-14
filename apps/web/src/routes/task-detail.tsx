@@ -1,13 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Flag, RotateCcw } from "lucide-react";
 import { useState } from "react";
-import { Link, useParams } from "react-router";
+import { useParams } from "react-router";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState, ErrorBanner, SkeletonRows } from "@/components/ui/feedback";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { DeadlineChip, nextAction, StatusBadge } from "@/components/task-bits";
+import { AvatarStack, PageHeader } from "@/components/ui/page";
+import { TaskActionButton } from "@/components/task-action";
+import { DeadlineChip, StatusBadge } from "@/components/task-bits";
 import { useTRPC } from "@/lib/trpc";
 import { useMe } from "./app-layout";
 import { ActivityList } from "./project-detail";
@@ -36,33 +39,30 @@ export function TaskDetailPage() {
 
   const t = task.data;
   const isAdmin = me.data?.role === "admin";
-  const action = nextAction(t as never, me.data!);
 
   return (
     <div className="space-y-6">
-      <div>
-        <Link to={`/projects/${t.projectId}`} className="text-sm text-gray-400 hover:text-gray-600">
-          ← {t.projectTitle}
-        </Link>
-        <div className="mt-1 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-semibold text-gray-900">{t.title}</h1>
-            <p className="text-sm text-gray-500">
-              {t.projectTitle} · {t.clientName}
-              {t.stageName ? ` · ${t.stageName}` : ""}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
+      <PageHeader
+        backTo={`/projects/${t.projectId}`}
+        backLabel={t.projectTitle}
+        title={t.title}
+        subtitle={`${t.projectTitle} · ${t.clientName}${t.stageName ? ` · ${t.stageName}` : ""}`}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={t.status as never} />
             <DeadlineChip deadline={t.deadline} />
-            {action && (
-              <Button
-                disabled={transition.isPending}
-                onClick={() => transition.mutate({ id: t.id, to: action.to })}
-              >
-                {action.label}
-              </Button>
-            )}
+            <TaskActionButton
+              task={{
+                id: t.id,
+                title: t.title,
+                status: t.status as never,
+                assigneeId: t.assigneeId,
+                requiresApproval: t.requiresApproval,
+                chainPosition: t.chainPosition,
+              }}
+              viewer={me.data!}
+              size="md"
+            />
             {isAdmin && t.status === "awaiting_approval" && (
               <Button
                 variant="secondary"
@@ -76,14 +76,19 @@ export function TaskDetailPage() {
               <Button
                 variant="secondary"
                 disabled={transition.isPending}
-                onClick={() => transition.mutate({ id: t.id, to: "in_progress" })}
+                onClick={() =>
+                  transition.mutate(
+                    { id: t.id, to: "in_progress" },
+                    { onSuccess: () => toast.info("Reopened — the next stage was adjusted if needed.") },
+                  )
+                }
               >
                 <RotateCcw size={14} /> Reopen
               </Button>
             )}
           </div>
-        </div>
-      </div>
+        }
+      />
 
       {t.flagged && (
         <div className="flex items-start gap-2 rounded-lg border border-orange-200 bg-orange-50 px-4 py-3">
@@ -112,13 +117,24 @@ export function TaskDetailPage() {
         </div>
 
         <div className="space-y-6">
-          {isAdmin && <AdminControls task={t} onChanged={invalidate} />}
+          {isAdmin && (
+            <AdminControls
+              task={{ ...t, helperIds: t.helpers.map((h) => h.id) }}
+              onChanged={invalidate}
+            />
+          )}
           <Card>
             <CardHeader>
               <CardTitle>Info</CardTitle>
             </CardHeader>
             <CardBody className="space-y-2 text-sm">
-              <InfoRow label="Assignee" value={t.assigneeName ?? "Unassigned"} />
+              <InfoRow label="Owner" value={t.assigneeName ?? "Unassigned"} />
+              {t.helpers.length > 0 && (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-gray-500">Helpers</span>
+                  <AvatarStack names={t.helpers.map((h) => h.name)} />
+                </div>
+              )}
               <InfoRow label="Stage" value={t.stageName ?? "Ad-hoc"} />
               <InfoRow label="Start" value={t.startDate ?? "—"} />
               <InfoRow label="Deadline" value={t.deadline ?? "—"} />
@@ -301,6 +317,7 @@ function AdminControls({
   task: {
     id: string;
     assigneeId: string | null;
+    helperIds: string[];
     deadline: string | null;
     flagged: boolean;
     driveLink: string | null;
@@ -313,10 +330,13 @@ function AdminControls({
   const [drive, setDrive] = useState(task.driveLink ?? "");
 
   const assign = useMutation(trpc.tasks.assign.mutationOptions({ onSettled: onChanged }));
+  const setHelpers = useMutation(trpc.tasks.setHelpers.mutationOptions({ onSettled: onChanged }));
   const setDeadline = useMutation(trpc.tasks.setDeadline.mutationOptions({ onSettled: onChanged }));
   const flag = useMutation(trpc.tasks.flag.mutationOptions({ onSettled: onChanged }));
   const unflag = useMutation(trpc.tasks.unflag.mutationOptions({ onSettled: onChanged }));
   const setDriveLink = useMutation(trpc.tasks.setDriveLink.mutationOptions({ onSettled: onChanged }));
+
+  const activeUsers = users.data?.filter((u) => u.active) ?? [];
 
   return (
     <Card>
@@ -325,7 +345,7 @@ function AdminControls({
       </CardHeader>
       <CardBody className="space-y-4">
         <div>
-          <Label htmlFor="t-assignee">Assignee</Label>
+          <Label htmlFor="t-assignee">Owner (accountable)</Label>
           <Select
             id="t-assignee"
             value={task.assigneeId ?? ""}
@@ -333,14 +353,44 @@ function AdminControls({
             onChange={(e) => assign.mutate({ id: task.id, assigneeId: e.target.value || null })}
           >
             <option value="">Unassigned</option>
-            {users.data
-              ?.filter((u) => u.active)
-              .map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name}
-                </option>
-              ))}
+            {activeUsers.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+              </option>
+            ))}
           </Select>
+        </div>
+        <div>
+          <Label>Helpers (also work on this)</Label>
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {activeUsers
+              .filter((u) => u.id !== task.assigneeId)
+              .map((u) => {
+                const on = task.helperIds.includes(u.id);
+                return (
+                  <button
+                    key={u.id}
+                    type="button"
+                    disabled={setHelpers.isPending}
+                    onClick={() =>
+                      setHelpers.mutate({
+                        id: task.id,
+                        userIds: on
+                          ? task.helperIds.filter((x) => x !== u.id)
+                          : [...task.helperIds, u.id],
+                      })
+                    }
+                    className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                      on
+                        ? "border-accent-600 bg-accent-50 text-accent-700"
+                        : "border-gray-300 bg-white text-gray-500 hover:bg-gray-50"
+                    }`}
+                  >
+                    {u.name}
+                  </button>
+                );
+              })}
+          </div>
         </div>
         <div>
           <Label htmlFor="t-deadline">Deadline</Label>

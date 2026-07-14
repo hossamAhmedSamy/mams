@@ -11,6 +11,91 @@ type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 type TaskRow = typeof schema.tasks.$inferSelect;
 
 /**
+ * Shared assignment resolution for handoff + preview (kept in one place so
+ * "what will happen" and "what happens" can never disagree).
+ * Rule B considers everyone on the completed task — owner first, then helpers.
+ */
+async function resolveNextAssignee(
+  tx: Tx | Db,
+  completed: TaskRow,
+  next: TaskRow,
+): Promise<{ assigneeId: string | null; route: "pre_assigned" | "same_person" | null }> {
+  if (next.assigneeId) {
+    const [pre] = await tx.select().from(schema.user).where(eq(schema.user.id, next.assigneeId));
+    if (pre && !pre.banned) return { assigneeId: pre.id, route: "pre_assigned" };
+  }
+  if (!next.stageId) return { assigneeId: null, route: null };
+
+  const candidates: string[] = [];
+  if (completed.assigneeId) candidates.push(completed.assigneeId);
+  const helpers = await tx
+    .select({ userId: schema.taskAssignees.userId })
+    .from(schema.taskAssignees)
+    .where(eq(schema.taskAssignees.taskId, completed.id));
+  for (const h of helpers) if (!candidates.includes(h.userId)) candidates.push(h.userId);
+
+  for (const candidateId of candidates) {
+    const [candidate] = await tx.select().from(schema.user).where(eq(schema.user.id, candidateId));
+    if (!candidate || candidate.banned) continue;
+    const overlap = await tx
+      .select({ skillId: schema.stageSkills.skillId })
+      .from(schema.stageSkills)
+      .innerJoin(
+        schema.userSkills,
+        and(
+          eq(schema.userSkills.skillId, schema.stageSkills.skillId),
+          eq(schema.userSkills.userId, candidateId),
+        ),
+      )
+      .where(eq(schema.stageSkills.stageId, next.stageId))
+      .limit(1);
+    if (overlap.length > 0) return { assigneeId: candidateId, route: "same_person" };
+  }
+  return { assigneeId: null, route: null };
+}
+
+/**
+ * "What will happen when this task is completed?" — powers the completion
+ * dialog so the handoff is visible before it runs.
+ */
+export async function previewHandoff(dbc: Db, taskId: string) {
+  const [task] = await dbc.select().from(schema.tasks).where(eq(schema.tasks.id, taskId));
+  if (!task || task.chainPosition === null) return null;
+  const [next] = await dbc
+    .select()
+    .from(schema.tasks)
+    .where(
+      and(
+        eq(schema.tasks.projectId, task.projectId),
+        eq(schema.tasks.chainPosition, task.chainPosition + 1),
+      ),
+    );
+  if (!next) return { kind: "last_stage" as const };
+  if (next.status !== "waiting") return { kind: "already_active" as const, nextTaskId: next.id };
+
+  const { assigneeId, route } = await resolveNextAssignee(dbc, task, next);
+  let assigneeName: string | null = null;
+  if (assigneeId) {
+    const [u] = await dbc.select().from(schema.user).where(eq(schema.user.id, assigneeId));
+    assigneeName = u?.name ?? null;
+  }
+  let defaultDeadline = next.deadline;
+  if (!defaultDeadline && next.stageId) {
+    const [stage] = await dbc.select().from(schema.stages).where(eq(schema.stages.id, next.stageId));
+    if (stage) defaultDeadline = addDaysISO(todayISO(env.TZ_BUSINESS), stage.defaultDurationDays);
+  }
+  return {
+    kind: "handoff" as const,
+    nextTaskId: next.id,
+    nextTitle: next.title,
+    route: route ?? ("unassigned" as const),
+    assigneeId,
+    assigneeName,
+    defaultDeadline,
+  };
+}
+
+/**
  * The handoff engine (PLAN.md §4.1). Runs INSIDE the caller's transaction,
  * immediately after a task's status was conditionally updated to 'done'.
  *
@@ -40,17 +125,10 @@ export async function runHandoff(tx: Tx, completed: TaskRow, actorId: string | n
 
   if (next.status !== "waiting") return; // already activated (e.g. re-completion after reopen)
 
-  // --- resolve assignee ----------------------------------------------------
-  let assigneeId: string | null = null;
-  let route: "pre_assigned" | "same_person" | null = null;
-
+  // --- resolve assignee (rules A/B shared with previewHandoff) --------------
   if (next.assigneeId) {
-    // RULE A: explicit pre-assignment
     const [pre] = await tx.select().from(schema.user).where(eq(schema.user.id, next.assigneeId));
-    if (pre && !pre.banned) {
-      assigneeId = pre.id;
-      route = "pre_assigned";
-    } else {
+    if (!pre || pre.banned) {
       await logActivity(tx, {
         actorId: null,
         entityType: "task",
@@ -58,34 +136,10 @@ export async function runHandoff(tx: Tx, completed: TaskRow, actorId: string | n
         action: "assignment_cleared",
         detail: { reason: "assignee_inactive", previousAssignee: next.assigneeId },
       });
+      next.assigneeId = null;
     }
   }
-
-  if (!assigneeId && completed.assigneeId && next.stageId) {
-    // RULE B: completer keeps the job if they hold a qualifying skill
-    const [completer] = await tx
-      .select()
-      .from(schema.user)
-      .where(eq(schema.user.id, completed.assigneeId));
-    if (completer && !completer.banned) {
-      const overlap = await tx
-        .select({ skillId: schema.stageSkills.skillId })
-        .from(schema.stageSkills)
-        .innerJoin(
-          schema.userSkills,
-          and(
-            eq(schema.userSkills.skillId, schema.stageSkills.skillId),
-            eq(schema.userSkills.userId, completer.id),
-          ),
-        )
-        .where(eq(schema.stageSkills.stageId, next.stageId))
-        .limit(1);
-      if (overlap.length > 0) {
-        assigneeId = completer.id;
-        route = "same_person";
-      }
-    }
-  }
+  const { assigneeId, route } = await resolveNextAssignee(tx, completed, next);
 
   // --- activate the successor ----------------------------------------------
   const today = todayISO(env.TZ_BUSINESS);
@@ -109,6 +163,12 @@ export async function runHandoff(tx: Tx, completed: TaskRow, actorId: string | n
       assigneeId,
     })
     .where(eq(schema.tasks.id, next.id));
+  if (assigneeId) {
+    await tx
+      .insert(schema.taskAssignees)
+      .values({ taskId: next.id, userId: assigneeId })
+      .onConflictDoNothing();
+  }
 
   await logActivity(tx, {
     actorId: null,

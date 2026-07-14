@@ -1,10 +1,19 @@
 import { zChecklist, zDateISO, zHttpsUrl, zTaskStatus } from "@mams/shared";
 import { z } from "zod";
+import { previewHandoff } from "../../services/handoff-engine";
 import * as taskService from "../../services/task-service";
 import { adminProcedure, protectedProcedure, router } from "../trpc";
 
 export const tasksRouter = router({
   myWork: protectedProcedure.query(({ ctx }) => taskService.myWork(ctx.user.id)),
+
+  calendar: protectedProcedure
+    .input(z.object({ from: zDateISO, to: zDateISO, userId: z.string().optional() }))
+    .query(({ ctx, input }) => taskService.calendar(ctx.user, input)),
+
+  handoffPreview: protectedProcedure
+    .input(z.object({ id: z.uuid() }))
+    .query(({ ctx, input }) => previewHandoff(ctx.db, input.id)),
 
   list: protectedProcedure
     .input(
@@ -65,6 +74,10 @@ export const tasksRouter = router({
   assign: adminProcedure
     .input(z.object({ id: z.uuid(), assigneeId: z.string().nullable() }))
     .mutation(({ ctx, input }) => taskService.assign(ctx.user, input)),
+
+  setHelpers: adminProcedure
+    .input(z.object({ id: z.uuid(), userIds: z.array(z.string()).max(10) }))
+    .mutation(({ ctx, input }) => taskService.setHelpers(ctx.user, input)),
 
   setDeadline: adminProcedure
     .input(z.object({ id: z.uuid(), deadline: zDateISO.nullable() }))

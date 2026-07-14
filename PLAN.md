@@ -21,6 +21,20 @@ This document is the implementation contract: Claude Code executes it milestone 
 - v1 MCP tools are read-only.
 - Every close call on a feature: **cut it**. The failure mode is the team going back to WhatsApp.
 
+**Owner-feedback amendments (2026-07-15, after first hands-on test):**
+- **Every screen must work well on a phone** — the team uses it on location, mid-shoot.
+  Bottom tab bar on mobile; tables become card lists; modals are bottom sheets.
+- **Calendar screen** (all users): month grid of tasks spanning start→deadline; members see
+  their own, admin sees everyone (color per person) and can click a day to add a task.
+- **Multi-assign via helpers:** a task keeps exactly ONE accountable owner
+  (`tasks.assignee_id`) plus optional **helpers** (`task_assignees` join). Helpers see the
+  task in My Work, can act on it, and count as handoff Rule-B candidates (owner first).
+- **Visible handoffs:** completing a chain task opens a confirmation dialog showing what
+  happens next (`tasks.handoffPreview`), with admin able to override assignee/deadline
+  inline (overrides are written to the successor as pre-assignment before completion).
+- **Flow builder UI:** admins create/edit/save workflow templates and the stage catalog in
+  Settings → Workflows (data model unchanged — this was always rows, now it has a screen).
+
 ---
 
 ## 1. Tech stack

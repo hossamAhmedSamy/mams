@@ -3,11 +3,12 @@ import { Check, ExternalLink } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
 import { EmptyState, ErrorBanner, SkeletonRows } from "@/components/ui/feedback";
 import { Select } from "@/components/ui/input";
-import { DeadlineChip, nextAction, PriorityDot, StatusBadge } from "@/components/task-bits";
+import { PageHeader } from "@/components/ui/page";
+import { TaskActionButton } from "@/components/task-action";
+import { DeadlineChip, PriorityDot, StatusBadge } from "@/components/task-bits";
 import { useTRPC } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { useMe } from "./app-layout";
@@ -43,46 +44,42 @@ export function ProjectDetailPage() {
   return (
     <div className="space-y-6">
       <div>
-        <Link to="/board" className="text-sm text-gray-400 hover:text-gray-600">
-          ← Projects
-        </Link>
-        <div className="mt-1 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-semibold text-gray-900">{p.title}</h1>
-            <p className="text-sm text-gray-500">
-              {p.clientName}
-              {p.campaign ? ` · ${p.campaign}` : ""}
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <PriorityDot priority={p.priority as "high" | "medium" | "low"} />
-            {p.driveLink && (
-              <a
-                href={p.driveLink}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1 text-sm text-accent-600 hover:underline"
-              >
-                Drive <ExternalLink size={13} />
-              </a>
-            )}
-            {isAdmin ? (
-              <Select
-                className="w-36"
-                value={p.status}
-                onChange={(e) => setStatus.mutate({ id: p.id, status: e.target.value as never })}
-              >
-                <option value="active">Active</option>
-                <option value="on_hold">On hold</option>
-                <option value="completed">Completed</option>
-                <option value="archived">Archived</option>
-              </Select>
-            ) : (
-              <Badge tone={p.status === "completed" ? "green" : "accent"}>{p.status}</Badge>
-            )}
-          </div>
-        </div>
-        {p.notes && <p className="mt-2 max-w-2xl text-sm text-gray-600">{p.notes}</p>}
+        <PageHeader
+          backTo="/board"
+          backLabel="Projects"
+          title={p.title}
+          subtitle={`${p.clientName}${p.campaign ? ` · ${p.campaign}` : ""}`}
+          actions={
+            <div className="flex items-center gap-3">
+              <PriorityDot priority={p.priority as "high" | "medium" | "low"} />
+              {p.driveLink && (
+                <a
+                  href={p.driveLink}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-sm text-accent-600 hover:underline"
+                >
+                  Drive <ExternalLink size={13} />
+                </a>
+              )}
+              {isAdmin ? (
+                <Select
+                  className="w-36"
+                  value={p.status}
+                  onChange={(e) => setStatus.mutate({ id: p.id, status: e.target.value as never })}
+                >
+                  <option value="active">Active</option>
+                  <option value="on_hold">On hold</option>
+                  <option value="completed">Completed</option>
+                  <option value="archived">Archived</option>
+                </Select>
+              ) : (
+                <Badge tone={p.status === "completed" ? "green" : "accent"}>{p.status}</Badge>
+              )}
+            </div>
+          }
+        />
+        {p.notes && <p className="-mt-3 max-w-2xl text-sm text-gray-600">{p.notes}</p>}
       </div>
 
       {chain.length > 0 && <ChainStepper chain={chain} isAdmin={isAdmin ?? false} />}
@@ -244,18 +241,6 @@ function TaskRow({
   };
   viewer: { id: string; role: "admin" | "member" };
 }) {
-  const trpc = useTRPC();
-  const queryClient = useQueryClient();
-  const transition = useMutation(
-    trpc.tasks.transition.mutationOptions({
-      onSettled: () => {
-        queryClient.invalidateQueries({ queryKey: trpc.projects.pathKey() });
-        queryClient.invalidateQueries({ queryKey: trpc.tasks.pathKey() });
-      },
-    }),
-  );
-  const action = nextAction(task as never, viewer);
-
   return (
     <Card className={task.flagged ? "border-orange-300" : ""}>
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
@@ -274,16 +259,17 @@ function TaskRow({
         </Link>
         <div className="flex shrink-0 items-center gap-3">
           <DeadlineChip deadline={task.deadline} />
-          {action && (
-            <Button
-              size="sm"
-              variant={task.status === "waiting" ? "secondary" : "primary"}
-              disabled={transition.isPending}
-              onClick={() => transition.mutate({ id: task.id, to: action.to })}
-            >
-              {action.label}
-            </Button>
-          )}
+          <TaskActionButton
+            task={{
+              id: task.id,
+              title: task.title,
+              status: task.status as never,
+              assigneeId: task.assigneeId,
+              requiresApproval: task.requiresApproval,
+              chainPosition: task.chainPosition,
+            }}
+            viewer={viewer}
+          />
         </div>
       </div>
     </Card>
