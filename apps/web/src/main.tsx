@@ -11,7 +11,9 @@ import { HomeRedirect } from "@/routes/home-redirect";
 import { LoginPage } from "@/routes/login";
 import { BoardPage } from "@/routes/board";
 import { MyWorkPage } from "@/routes/my-work";
+import { ProjectDetailPage } from "@/routes/project-detail";
 import { UsersSettingsPage } from "@/routes/settings-users";
+import { TaskDetailPage } from "@/routes/task-detail";
 import "./styles.css";
 
 const queryClient = new QueryClient({
@@ -33,6 +35,8 @@ const router = createBrowserRouter([
       { path: "/", element: <HomeRedirect /> },
       { path: "/my-work", element: <MyWorkPage /> },
       { path: "/board", element: <BoardPage /> },
+      { path: "/projects/:id", element: <ProjectDetailPage /> },
+      { path: "/tasks/:id", element: <TaskDetailPage /> },
       { path: "/settings/users", element: <UsersSettingsPage /> },
     ],
   },

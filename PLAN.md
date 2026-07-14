@@ -184,8 +184,9 @@ The `user` table is extended with app columns:
 
 ```sql
 user (better-auth base: id text PK, name, email UNIQUE, emailVerified, image, createdAt, updatedAt)
-  + role        text NOT NULL DEFAULT 'member'  CHECK (role IN ('admin','member'))
-  + active      boolean NOT NULL DEFAULT true   -- inactive users cannot log in or receive assignments
+  + role                 text NOT NULL DEFAULT 'member'  CHECK (role IN ('admin','member'))
+  + banned               boolean NOT NULL DEFAULT false  -- "active" in the UI = NOT banned; better-auth blocks banned sign-ins
+  + must_change_password boolean NOT NULL DEFAULT true   -- forced change on first login of provisioned accounts
 ```
 
 ```sql
@@ -693,7 +694,7 @@ not scaffolded.
 
 ### 7.3 Security hardening (applies to the whole API)
 
-- **AuthN:** better-auth email+password (argon2), httpOnly + Secure + SameSite=Lax session
+- **AuthN:** better-auth email+password (scrypt, better-auth's default KDF), httpOnly + Secure + SameSite=Lax session
   cookie (same-origin in trial mode; scoped to the apex domain in paid mode); sliding expiry
   30 days; login rate-limited
   (5/min/IP + per-account backoff). **No signup route exists.** Admin creates users with a
