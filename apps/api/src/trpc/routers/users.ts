@@ -1,7 +1,10 @@
-import { zPassword } from "@mams/shared";
+import { PERMISSIONS, zPassword } from "@mams/shared";
 import { z } from "zod";
 import * as userService from "../../services/user-service";
-import { adminProcedure, protectedProcedure, router } from "../trpc";
+import { permissionProcedure, protectedProcedure, router } from "../trpc";
+
+const manageTeam = permissionProcedure("settings.team");
+const zPermissions = z.array(z.enum(PERMISSIONS)).max(PERMISSIONS.length);
 
 export const usersRouter = router({
   me: protectedProcedure.query(({ ctx }) => ({
@@ -9,6 +12,7 @@ export const usersRouter = router({
     name: ctx.user.name,
     email: ctx.user.email,
     role: ctx.user.role,
+    permissions: ctx.user.permissions,
     mustChangePassword: ctx.user.mustChangePassword,
   })),
 
@@ -16,9 +20,10 @@ export const usersRouter = router({
     .input(z.object({ currentPassword: z.string().min(1), newPassword: zPassword }))
     .mutation(({ ctx, input }) => userService.changeOwnPassword(ctx.user.id, input)),
 
-  list: adminProcedure.query(() => userService.listUsers()),
+  /** Everyone needs the roster to see who is on a task. */
+  list: protectedProcedure.query(() => userService.listUsers()),
 
-  create: adminProcedure
+  create: manageTeam
     .input(
       z.object({
         name: z.string().min(1).max(120),
@@ -26,11 +31,12 @@ export const usersRouter = router({
         tempPassword: zPassword,
         role: z.enum(["admin", "member"]),
         skillIds: z.array(z.uuid()).default([]),
+        permissions: zPermissions.default([]),
       }),
     )
     .mutation(({ ctx, input }) => userService.createUser(ctx.user.id, input)),
 
-  update: adminProcedure
+  update: manageTeam
     .input(
       z.object({
         id: z.string(),
@@ -40,15 +46,19 @@ export const usersRouter = router({
     )
     .mutation(({ ctx, input }) => userService.updateUser(ctx.user.id, input)),
 
-  setSkills: adminProcedure
+  setSkills: manageTeam
     .input(z.object({ id: z.string(), skillIds: z.array(z.uuid()) }))
     .mutation(({ ctx, input }) => userService.setSkills(ctx.user.id, input)),
 
-  setActive: adminProcedure
+  setPermissions: manageTeam
+    .input(z.object({ id: z.string(), permissions: zPermissions }))
+    .mutation(({ ctx, input }) => userService.setPermissions(ctx.user.id, input)),
+
+  setActive: manageTeam
     .input(z.object({ id: z.string(), active: z.boolean() }))
     .mutation(({ ctx, input }) => userService.setActive(ctx.user.id, input)),
 
-  resetPassword: adminProcedure
+  resetPassword: manageTeam
     .input(z.object({ id: z.string(), tempPassword: zPassword }))
     .mutation(({ ctx, input }) => userService.resetPassword(ctx.user.id, input)),
 });

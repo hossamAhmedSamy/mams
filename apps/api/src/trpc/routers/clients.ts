@@ -3,9 +3,11 @@ import { TRPCError } from "@trpc/server";
 import { and, asc, count, eq } from "drizzle-orm";
 import { z } from "zod";
 import { logActivity } from "../../services/activity";
-import { adminProcedure, protectedProcedure, router } from "../trpc";
+import { permissionProcedure, protectedProcedure, router } from "../trpc";
 
 const { clients, projects } = schema;
+
+const manageProjects = permissionProcedure("projects.manage");
 
 export const clientsRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
@@ -24,7 +26,7 @@ export const clientsRouter = router({
     return rows;
   }),
 
-  create: adminProcedure
+  create: manageProjects
     .input(z.object({ name: z.string().min(1).max(200), notes: z.string().max(5000).optional() }))
     .mutation(async ({ ctx, input }) => {
       const [row] = await ctx.db
@@ -43,7 +45,7 @@ export const clientsRouter = router({
       return row;
     }),
 
-  update: adminProcedure
+  update: manageProjects
     .input(
       z.object({
         id: z.uuid(),

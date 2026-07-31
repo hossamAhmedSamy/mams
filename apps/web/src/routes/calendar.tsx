@@ -1,3 +1,4 @@
+import { taskLabel } from "@mams/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -8,11 +9,12 @@ import { Card } from "@/components/ui/card";
 import { ErrorBanner, SkeletonRows } from "@/components/ui/feedback";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
+import { PeoplePicker } from "@/components/people-picker";
 import { colorForName, PageHeader } from "@/components/ui/page";
 import { addDaysISO, todayISO } from "@/lib/dates";
+import { useCan } from "@/lib/session";
 import { useTRPC } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
-import { useMe } from "./app-layout";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MONTHS = [
@@ -22,27 +24,28 @@ const MONTHS = [
 
 type CalTask = {
   id: string;
-  title: string;
   status: string;
   deadline: string | null;
   startDate: string | null;
   projectTitle: string;
   clientName: string;
-  assigneeName: string | null;
+  stageName: string | null;
+  assignees: { id: string; name: string }[];
   flagged: boolean;
 };
 
 export function CalendarPage() {
-  const me = useMe();
   const trpc = useTRPC();
-  const isAdmin = me.data?.role === "admin";
+  const can = useCan();
+  const seesEveryone = can("team.viewAll");
+  const canAddTasks = can("tasks.manage");
   const today = todayISO();
 
   const [cursor, setCursor] = useState(() => today.slice(0, 7)); // YYYY-MM
   const [personFilter, setPersonFilter] = useState("");
   const [quickAddDay, setQuickAddDay] = useState<string | null>(null);
 
-  const users = useQuery({ ...trpc.users.list.queryOptions(), enabled: isAdmin ?? false });
+  const users = useQuery({ ...trpc.users.list.queryOptions(), enabled: seesEveryone });
 
   // month grid: weeks starting Monday, padded to full weeks
   const grid = useMemo(() => buildMonthGrid(cursor), [cursor]);
@@ -81,11 +84,11 @@ export function CalendarPage() {
       <PageHeader
         title="Calendar"
         subtitle={
-          isAdmin ? "Everyone's work, day by day — click a day to add a task" : "Your work, day by day"
+          seesEveryone ? "Everyone's work, day by day — tap a day to add a task" : "Your work, day by day"
         }
         actions={
           <div className="flex items-center gap-2">
-            {isAdmin && (
+            {seesEveryone && (
               <Select
                 className="w-40"
                 value={personFilter}
@@ -147,8 +150,8 @@ export function CalendarPage() {
                 cell={cell}
                 today={today}
                 tasks={tasksByDay.get(cell.date) ?? []}
-                colorByPerson={isAdmin && !personFilter}
-                onQuickAdd={isAdmin ? () => setQuickAddDay(cell.date) : undefined}
+                colorByPerson={seesEveryone && !personFilter}
+                onQuickAdd={canAddTasks ? () => setQuickAddDay(cell.date) : undefined}
               />
             ))}
           </div>
@@ -212,16 +215,19 @@ function DayCell({
         {shown.map((task) => {
           const overdue = task.deadline !== null && task.deadline < today;
           const dueToday = task.deadline === cell.date;
+          const label = taskLabel(task.stageName);
+          const who = task.assignees.map((a) => a.name);
+          const lead = who[0];
           return (
             <Link
               key={task.id}
               to={`/tasks/${task.id}`}
-              title={`${task.title} — ${task.projectTitle} (${task.assigneeName ?? "unassigned"})`}
+              title={`${label} — ${task.projectTitle} (${who.length > 0 ? who.join(", ") : "unassigned"})`}
               className={cn(
                 "block truncate rounded px-1.5 py-0.5 text-[11px] font-medium leading-4 text-white",
                 colorByPerson
-                  ? task.assigneeName
-                    ? colorForName(task.assigneeName)
+                  ? lead
+                    ? colorForName(lead)
                     : "bg-gray-400"
                   : overdue
                     ? "bg-status-overdue"
@@ -231,8 +237,10 @@ function DayCell({
                 dueToday && "ring-1 ring-inset ring-white/60",
               )}
             >
-              {colorByPerson && task.assigneeName ? `${task.assigneeName.split(" ")[0]}: ` : ""}
-              {task.title}
+              {colorByPerson && lead
+                ? `${lead.split(" ")[0]}${who.length > 1 ? ` +${who.length - 1}` : ""}: `
+                : ""}
+              {label}
             </Link>
           );
         })}
@@ -244,20 +252,23 @@ function DayCell({
   );
 }
 
+/** Tap a day → add work that lands on it. The day becomes the deadline. */
 function QuickAddModal({ day, onClose }: { day: string; onClose: () => void }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const projects = useQuery(trpc.projects.list.queryOptions({ status: "active" }));
-  const users = useQuery(trpc.users.list.queryOptions());
+  const stages = useQuery(trpc.workflows.listStages.queryOptions());
   const [projectId, setProjectId] = useState("");
-  const [title, setTitle] = useState("");
-  const [assigneeId, setAssigneeId] = useState("");
+  const [stageId, setStageId] = useState("");
+  const [startDate, setStartDate] = useState(day);
+  const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
 
   const create = useMutation(
     trpc.tasks.create.mutationOptions({
       onSuccess: () => {
         toast.success(`Task added for ${day}`);
         queryClient.invalidateQueries({ queryKey: trpc.tasks.pathKey() });
+        queryClient.invalidateQueries({ queryKey: trpc.projects.pathKey() });
         onClose();
       },
       onError: (err) => toast.error(err.message),
@@ -266,7 +277,7 @@ function QuickAddModal({ day, onClose }: { day: string; onClose: () => void }) {
 
   return (
     <Modal
-      title={`New task · ${day}`}
+      title={`New task · due ${day}`}
       onClose={onClose}
       footer={
         <>
@@ -274,13 +285,14 @@ function QuickAddModal({ day, onClose }: { day: string; onClose: () => void }) {
             Cancel
           </Button>
           <Button
-            disabled={create.isPending || !projectId || !title.trim()}
+            disabled={create.isPending || !projectId || !stageId}
             onClick={() =>
               create.mutate({
                 projectId,
-                title: title.trim(),
+                stageId,
+                startDate: startDate || undefined,
                 deadline: day,
-                assigneeId: assigneeId || undefined,
+                assigneeIds,
               })
             }
           >
@@ -302,26 +314,31 @@ function QuickAddModal({ day, onClose }: { day: string; onClose: () => void }) {
           </Select>
         </div>
         <div>
-          <Label htmlFor="qa-title">Task</Label>
-          <Input
-            id="qa-title"
-            placeholder="What needs to happen?"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-        </div>
-        <div>
-          <Label htmlFor="qa-assignee">Assign to</Label>
-          <Select id="qa-assignee" value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
-            <option value="">Unassigned</option>
-            {users.data
-              ?.filter((u) => u.active)
-              .map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name}
+          <Label htmlFor="qa-stage">Kind of work</Label>
+          <Select id="qa-stage" value={stageId} onChange={(e) => setStageId(e.target.value)}>
+            <option value="">Choose…</option>
+            {stages.data
+              ?.filter((s) => s.active)
+              .map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
                 </option>
               ))}
           </Select>
+        </div>
+        <div>
+          <Label htmlFor="qa-start">Start date</Label>
+          <Input
+            id="qa-start"
+            type="date"
+            value={startDate}
+            max={day}
+            onChange={(e) => setStartDate(e.target.value)}
+          />
+        </div>
+        <div>
+          <Label>Who's on it</Label>
+          <PeoplePicker selected={assigneeIds} onChange={setAssigneeIds} />
         </div>
       </div>
     </Modal>

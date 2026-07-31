@@ -1,7 +1,7 @@
 import { schema } from "@mams/db";
 import { desc, and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { adminProcedure, protectedProcedure, router } from "../trpc";
+import { permissionProcedure, protectedProcedure, router } from "../trpc";
 
 const { activityLog, user } = schema;
 
@@ -31,7 +31,7 @@ export const activityRouter = router({
         .limit(input.limit),
     ),
 
-  recent: adminProcedure
+  recent: permissionProcedure("team.viewAll")
     .input(z.object({ limit: z.number().max(100).default(20) }).default({ limit: 20 }))
     .query(({ ctx, input }) =>
       ctx.db

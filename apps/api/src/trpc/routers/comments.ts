@@ -1,11 +1,12 @@
 import { schema } from "@mams/db";
+import { taskLabel } from "@mams/shared";
 import { TRPCError } from "@trpc/server";
 import { asc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { notifyUser } from "../../services/notify";
 import { protectedProcedure, router } from "../trpc";
 
-const { comments, tasks, user } = schema;
+const { comments, tasks, stages, taskAssignees, user } = schema;
 
 export const commentsRouter = router({
   listByTask: protectedProcedure.input(z.object({ taskId: z.uuid() })).query(({ ctx, input }) =>
@@ -32,10 +33,18 @@ export const commentsRouter = router({
         .insert(comments)
         .values({ taskId: input.taskId, authorId: ctx.user.id, body: input.body })
         .returning();
-      if (task.assigneeId && task.assigneeId !== ctx.user.id) {
-        await notifyUser(ctx.db, task.assigneeId, {
+      const [stage] = task.stageId
+        ? await ctx.db.select().from(stages).where(eq(stages.id, task.stageId))
+        : [];
+      const label = taskLabel(stage?.name ?? null);
+      for (const person of await ctx.db
+        .select({ userId: taskAssignees.userId })
+        .from(taskAssignees)
+        .where(eq(taskAssignees.taskId, task.id))) {
+        if (person.userId === ctx.user.id) continue;
+        await notifyUser(ctx.db, person.userId, {
           type: "comment_added",
-          title: `${ctx.user.name} commented on "${task.title}"`,
+          title: `${ctx.user.name} commented on "${label}"`,
           body: input.body.slice(0, 200),
           entityType: "task",
           entityId: task.id,

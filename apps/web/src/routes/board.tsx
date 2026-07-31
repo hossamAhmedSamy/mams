@@ -7,16 +7,17 @@ import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState, ErrorBanner, SkeletonRows } from "@/components/ui/feedback";
 import { Input, Label, Select } from "@/components/ui/input";
+import { PeoplePicker } from "@/components/people-picker";
 import { PriorityDot } from "@/components/task-bits";
-import { PageHeader } from "@/components/ui/page";
+import { AvatarStack, PageHeader } from "@/components/ui/page";
 import { formatShort, todayISO } from "@/lib/dates";
+import { useCan } from "@/lib/session";
 import { useTRPC } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
-import { useMe } from "./app-layout";
 
 export function BoardPage() {
   const trpc = useTRPC();
-  const me = useMe();
+  const can = useCan();
   const projects = useQuery(trpc.projects.list.queryOptions({}));
   const clients = useQuery(trpc.clients.list.queryOptions());
   const [showCreate, setShowCreate] = useState(false);
@@ -24,7 +25,7 @@ export function BoardPage() {
   const [statusFilter, setStatusFilter] = useState("active");
   const [lateOnly, setLateOnly] = useState(false);
 
-  const isAdmin = me.data?.role === "admin";
+  const canCreate = can("projects.manage");
 
   const filtered = useMemo(() => {
     if (!projects.data) return [];
@@ -42,7 +43,7 @@ export function BoardPage() {
         title="Projects"
         subtitle="Where everything stands"
         actions={
-          isAdmin && (
+          canCreate && (
             <Button onClick={() => setShowCreate((v) => !v)}>
               <Plus size={16} /> New project
             </Button>
@@ -97,7 +98,7 @@ export function BoardPage() {
         ) : filtered.length === 0 ? (
           <EmptyState
             title="No projects match"
-            hint={isAdmin ? "Create your first project to get the board moving." : "Nothing here yet."}
+            hint={canCreate ? "Create your first project to get the board moving." : "Nothing here yet."}
           />
         ) : (
           <>
@@ -130,7 +131,7 @@ export function BoardPage() {
                     ) : null}
                     <span className="text-xs text-gray-400">
                       {p.stagesTotal > 0 ? `${p.stagesDone}/${p.stagesTotal} stages` : ""}
-                      {p.currentAssignee ? ` · ${p.currentAssignee}` : ""}
+                      {p.currentAssignees.length > 0 ? ` · ${p.currentAssignees.join(", ")}` : ""}
                     </span>
                   </div>
                 </Link>
@@ -145,7 +146,7 @@ export function BoardPage() {
                   <th className="px-4 py-3">Client / Project</th>
                   <th className="px-4 py-3">Priority</th>
                   <th className="px-4 py-3">Stage</th>
-                  <th className="px-4 py-3">Assignee</th>
+                  <th className="px-4 py-3">On it</th>
                   <th className="px-4 py-3">Progress</th>
                   <th className="px-4 py-3">Due</th>
                 </tr>
@@ -178,7 +179,11 @@ export function BoardPage() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-gray-600">
-                      {p.currentAssignee ?? <span className="text-xs text-gray-400">Unassigned</span>}
+                      {p.currentAssignees.length > 0 ? (
+                        <AvatarStack names={p.currentAssignees} />
+                      ) : (
+                        <span className="text-xs text-gray-400">Unassigned</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-gray-600">
                       {p.stagesTotal > 0 ? `${p.stagesDone}/${p.stagesTotal}` : "—"}
@@ -209,17 +214,17 @@ function CreateProjectCard({ onDone }: { onDone: () => void }) {
   const queryClient = useQueryClient();
   const clients = useQuery(trpc.clients.list.queryOptions());
   const templates = useQuery(trpc.workflows.listTemplates.queryOptions());
-  const users = useQuery(trpc.users.list.queryOptions());
 
   const [clientId, setClientId] = useState("");
   const [newClientName, setNewClientName] = useState("");
   const [title, setTitle] = useState("");
   const [campaign, setCampaign] = useState("");
   const [priority, setPriority] = useState<"high" | "medium" | "low">("medium");
+  const [startDate, setStartDate] = useState(todayISO());
   const [dueDate, setDueDate] = useState("");
   const [budget, setBudget] = useState("");
   const [templateId, setTemplateId] = useState("");
-  const [firstAssigneeId, setFirstAssigneeId] = useState("");
+  const [firstAssigneeIds, setFirstAssigneeIds] = useState<string[]>([]);
   const [driveLink, setDriveLink] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -255,8 +260,8 @@ function CreateProjectCard({ onDone }: { onDone: () => void }) {
         driveLink: driveLink || undefined,
         budget: budget ? Number(budget) : undefined,
         workflowTemplateId: templateId || undefined,
-        firstAssigneeId: firstAssigneeId || undefined,
-        startDate: todayISO(),
+        firstAssigneeIds,
+        startDate: startDate || undefined,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -312,14 +317,27 @@ function CreateProjectCard({ onDone }: { onDone: () => void }) {
               <option value="low">Low</option>
             </Select>
           </div>
-          <div>
-            <Label htmlFor="p-due">Due date</Label>
-            <Input
-              id="p-due"
-              type="date"
-              value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="p-start">Start date</Label>
+              <Input
+                id="p-start"
+                type="date"
+                value={startDate}
+                max={dueDate || undefined}
+                onChange={(e) => setStartDate(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label htmlFor="p-due">Due date</Label>
+              <Input
+                id="p-due"
+                type="date"
+                value={dueDate}
+                min={startDate || undefined}
+                onChange={(e) => setDueDate(e.target.value)}
+              />
+            </div>
           </div>
           <div>
             <Label htmlFor="p-budget">Budget (EGP, optional)</Label>
@@ -365,22 +383,13 @@ function CreateProjectCard({ onDone }: { onDone: () => void }) {
             )}
           </div>
           {templateId && (
-            <div>
-              <Label htmlFor="p-assignee">Assign first stage to</Label>
-              <Select
-                id="p-assignee"
-                value={firstAssigneeId}
-                onChange={(e) => setFirstAssigneeId(e.target.value)}
-              >
-                <option value="">Leave unassigned</option>
-                {users.data
-                  ?.filter((u) => u.active)
-                  .map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name}
-                    </option>
-                  ))}
-              </Select>
+            <div className="sm:col-span-2">
+              <Label>Who starts the first stage</Label>
+              <PeoplePicker
+                selected={firstAssigneeIds}
+                onChange={setFirstAssigneeIds}
+                emptyHint="Leave empty and it lands in the unassigned queue."
+              />
             </div>
           )}
           {error && <p className="text-sm text-red-600 sm:col-span-2">{error}</p>}

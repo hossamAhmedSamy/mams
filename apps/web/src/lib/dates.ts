@@ -19,6 +19,21 @@ export function formatShort(dateISO: string): string {
   return new Date(y, m - 1, d).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
+/** "Starts 3 Aug · due 7 Aug" — the task's window in one phrase, or null. */
+export function spanLabel(
+  startDate: string | null,
+  deadline: string | null,
+  today = todayISO(),
+): string | null {
+  const due = deadline ? `due ${formatShort(deadline)}` : null;
+  if (!startDate) return due ? due.charAt(0).toUpperCase() + due.slice(1) : null;
+  const starts =
+    startDate > today
+      ? `Starts ${formatShort(startDate)}`
+      : `Started ${formatShort(startDate)}`;
+  return due ? `${starts} · ${due}` : starts;
+}
+
 /** "3 days late" | "Today" | "Tomorrow" | "Mon 21 Jul"-ish relative deadline. */
 export function deadlineLabel(deadline: string, today = todayISO()): {
   text: string;

@@ -3,7 +3,10 @@ import { zDateISO, zHttpsUrl, zMoney } from "@mams/shared";
 import { asc, eq } from "drizzle-orm";
 import { z } from "zod";
 import * as financeService from "../../services/finance-service";
-import { adminProcedure, protectedProcedure, router } from "../trpc";
+import { permissionProcedure, protectedProcedure, router } from "../trpc";
+
+const viewMoney = permissionProcedure("money.view");
+const manageMoney = permissionProcedure("money.manage");
 
 export const financeRouter = router({
   // --- member-accessible (own money only; never the ledger) -----------------
@@ -36,15 +39,15 @@ export const financeRouter = router({
     .input(z.object({ id: z.uuid() }))
     .mutation(({ ctx, input }) => financeService.cancelMyRequest(ctx.user, input.id)),
 
-  // --- admin ----------------------------------------------------------------
+  // --- money permissions ------------------------------------------------------
 
-  pendingRequests: adminProcedure.query(() => financeService.listPendingRequests()),
+  pendingRequests: viewMoney.query(() => financeService.listPendingRequests()),
 
-  decide: adminProcedure
+  decide: manageMoney
     .input(z.object({ id: z.uuid(), approve: z.boolean(), note: z.string().max(500).optional() }))
     .mutation(({ ctx, input }) => financeService.decideExpense(ctx.user, input)),
 
-  addExpense: adminProcedure
+  addExpense: manageMoney
     .input(
       z.object({
         projectId: z.uuid().optional(),
@@ -58,11 +61,11 @@ export const financeRouter = router({
     )
     .mutation(({ ctx, input }) => financeService.addExpense(ctx.user, input)),
 
-  deleteExpense: adminProcedure
+  deleteExpense: manageMoney
     .input(z.object({ id: z.uuid() }))
     .mutation(({ ctx, input }) => financeService.deleteExpense(ctx.user, input.id)),
 
-  addIncome: adminProcedure
+  addIncome: manageMoney
     .input(
       z.object({
         projectId: z.uuid(),
@@ -73,20 +76,20 @@ export const financeRouter = router({
     )
     .mutation(({ ctx, input }) => financeService.addIncome(ctx.user, input)),
 
-  deleteIncome: adminProcedure
+  deleteIncome: manageMoney
     .input(z.object({ id: z.uuid() }))
     .mutation(({ ctx, input }) => financeService.deleteIncome(ctx.user, input.id)),
 
-  projectLedger: adminProcedure
+  projectLedger: viewMoney
     .input(z.object({ projectId: z.uuid() }))
     .query(({ input }) => financeService.projectLedger(input.projectId)),
 
-  overview: adminProcedure
+  overview: viewMoney
     .input(z.object({ from: zDateISO, to: zDateISO }))
     .query(({ input }) => financeService.overview(input)),
 
   categories: router({
-    create: adminProcedure
+    create: manageMoney
       .input(z.object({ name: z.string().min(1).max(80) }))
       .mutation(async ({ ctx, input }) => {
         const [row] = await ctx.db
@@ -96,7 +99,7 @@ export const financeRouter = router({
           .returning();
         return row ?? null;
       }),
-    setActive: adminProcedure
+    setActive: manageMoney
       .input(z.object({ id: z.uuid(), active: z.boolean() }))
       .mutation(({ ctx, input }) =>
         ctx.db
@@ -107,8 +110,8 @@ export const financeRouter = router({
   }),
 
   recurring: router({
-    list: adminProcedure.query(() => financeService.listRecurring()),
-    create: adminProcedure
+    list: viewMoney.query(() => financeService.listRecurring()),
+    create: manageMoney
       .input(
         z.object({
           name: z.string().min(1).max(200),
@@ -119,7 +122,7 @@ export const financeRouter = router({
         }),
       )
       .mutation(({ ctx, input }) => financeService.createRecurring(ctx.user, input)),
-    update: adminProcedure
+    update: manageMoney
       .input(
         z.object({
           id: z.uuid(),

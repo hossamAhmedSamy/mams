@@ -4,7 +4,9 @@ import { TRPCError } from "@trpc/server";
 import { asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { logActivity } from "../../services/activity";
-import { adminProcedure, protectedProcedure, router } from "../trpc";
+import { permissionProcedure, protectedProcedure, router } from "../trpc";
+
+const manageWorkflows = permissionProcedure("settings.workflows");
 
 const { workflowTemplates, templateStages, stages, stageSkills, skills } = schema;
 
@@ -52,7 +54,7 @@ export const workflowsRouter = router({
 
   // --- template builder (admin creates flows and saves them for reuse) ------
 
-  createTemplate: adminProcedure
+  createTemplate: manageWorkflows
     .input(z.object({ name: z.string().min(1).max(120), chain: zTemplateChain }))
     .mutation(async ({ ctx, input }) => {
       return ctx.db.transaction(async (tx) => {
@@ -82,7 +84,7 @@ export const workflowsRouter = router({
     }),
 
   /** Replaces the chain. Running projects are untouched (snapshot semantics). */
-  updateTemplate: adminProcedure
+  updateTemplate: manageWorkflows
     .input(
       z.object({
         id: z.uuid(),
@@ -118,7 +120,7 @@ export const workflowsRouter = router({
       });
     }),
 
-  setTemplateActive: adminProcedure
+  setTemplateActive: manageWorkflows
     .input(z.object({ id: z.uuid(), active: z.boolean() }))
     .mutation(({ ctx, input }) =>
       ctx.db
@@ -129,7 +131,7 @@ export const workflowsRouter = router({
 
   // --- stage catalog ---------------------------------------------------------
 
-  createStage: adminProcedure
+  createStage: manageWorkflows
     .input(
       z.object({
         name: z.string().min(1).max(120),
@@ -172,7 +174,7 @@ export const workflowsRouter = router({
       });
     }),
 
-  updateStage: adminProcedure
+  updateStage: manageWorkflows
     .input(
       z.object({
         id: z.uuid(),

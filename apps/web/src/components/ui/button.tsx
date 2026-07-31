@@ -7,14 +7,14 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        primary: "bg-accent-600 text-white hover:bg-accent-700",
-        secondary: "border border-gray-300 bg-white text-gray-700 hover:bg-gray-50",
-        ghost: "text-gray-600 hover:bg-gray-100",
+        primary: "bg-accent-600 text-white shadow-xs hover:bg-accent-700 active:bg-accent-700",
+        secondary: "border border-gray-200 bg-white text-gray-700 shadow-xs hover:bg-gray-50",
+        ghost: "text-gray-600 hover:bg-gray-100 hover:text-gray-900",
         danger: "bg-status-overdue text-white hover:opacity-90",
       },
       size: {
-        sm: "h-8 px-3",
-        md: "h-9 px-4",
+        sm: "h-9 px-3 sm:h-8",
+        md: "h-10 px-4 sm:h-9",
         lg: "h-10 px-5",
       },
     },

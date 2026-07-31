@@ -1,3 +1,4 @@
+import { can, type Permission } from "@mams/shared";
 import { initTRPC, TRPCError } from "@trpc/server";
 import type { Context } from "./context";
 
@@ -18,7 +19,18 @@ export const protectedProcedure = t.procedure.use(({ ctx, next }) => {
   return next({ ctx: { ...ctx, user: ctx.user } });
 });
 
-/** Admin only (PLAN.md §3). */
+/**
+ * Gate on a capability rather than a role (PLAN.md §3, refined): admins hold
+ * every permission, members hold exactly what an admin granted them.
+ */
+export function permissionProcedure(permission: Permission) {
+  return protectedProcedure.use(({ ctx, next }) => {
+    if (!can(ctx.user, permission)) throw new TRPCError({ code: "FORBIDDEN" });
+    return next({ ctx });
+  });
+}
+
+/** Role-only gate, for the few things that stay the account owner's alone. */
 export const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
   if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
   return next({ ctx });

@@ -22,6 +22,13 @@
       "when": 1784072168548,
       "tag": "0002_familiar_ogun",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785456044028,
+      "tag": "0003_glorious_big_bertha",
+      "breakpoints": true
     }
   ]
 }

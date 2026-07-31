@@ -1,42 +1,56 @@
 import { schema } from "@mams/db";
+import { taskLabel } from "@mams/shared";
 import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import type { Db } from "../db";
 import { env } from "../env";
 import { addDaysISO, todayISO } from "../lib/time";
 import { logActivity } from "./activity";
-import { notifyAdmins, notifyUser } from "./notify";
+import { notifyResponsible, notifyUser } from "./notify";
 import { scheduleStageAutoReminder } from "./reminder-service";
 
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 type TaskRow = typeof schema.tasks.$inferSelect;
 
+async function assigneesOf(tx: Tx | Db, taskId: string): Promise<string[]> {
+  const rows = await tx
+    .select({ userId: schema.taskAssignees.userId })
+    .from(schema.taskAssignees)
+    .where(eq(schema.taskAssignees.taskId, taskId));
+  return rows.map((r) => r.userId);
+}
+
+async function labelOfStage(tx: Tx | Db, stageId: string | null): Promise<string> {
+  if (!stageId) return taskLabel(null);
+  const [stage] = await tx.select().from(schema.stages).where(eq(schema.stages.id, stageId));
+  return taskLabel(stage?.name ?? null);
+}
+
+async function isActive(tx: Tx | Db, userId: string) {
+  const [u] = await tx.select().from(schema.user).where(eq(schema.user.id, userId));
+  return !!u && !u.banned;
+}
+
 /**
  * Shared assignment resolution for handoff + preview (kept in one place so
- * "what will happen" and "what happens" can never disagree).
- * Rule B considers everyone on the completed task — owner first, then helpers.
+ * "what will happen" and "what happens" can never disagree). Rule B considers
+ * everyone who worked the completed task and keeps *all* of them who hold a
+ * qualifying skill — assignment is a set now, not a single owner.
  */
-async function resolveNextAssignee(
+async function resolveNextAssignees(
   tx: Tx | Db,
   completed: TaskRow,
   next: TaskRow,
-): Promise<{ assigneeId: string | null; route: "pre_assigned" | "same_person" | null }> {
-  if (next.assigneeId) {
-    const [pre] = await tx.select().from(schema.user).where(eq(schema.user.id, next.assigneeId));
-    if (pre && !pre.banned) return { assigneeId: pre.id, route: "pre_assigned" };
+): Promise<{ assigneeIds: string[]; route: "pre_assigned" | "same_person" | null }> {
+  const preAssigned: string[] = [];
+  for (const userId of await assigneesOf(tx, next.id)) {
+    if (await isActive(tx, userId)) preAssigned.push(userId);
   }
-  if (!next.stageId) return { assigneeId: null, route: null };
+  if (preAssigned.length > 0) return { assigneeIds: preAssigned, route: "pre_assigned" };
+  if (!next.stageId) return { assigneeIds: [], route: null };
 
-  const candidates: string[] = [];
-  if (completed.assigneeId) candidates.push(completed.assigneeId);
-  const helpers = await tx
-    .select({ userId: schema.taskAssignees.userId })
-    .from(schema.taskAssignees)
-    .where(eq(schema.taskAssignees.taskId, completed.id));
-  for (const h of helpers) if (!candidates.includes(h.userId)) candidates.push(h.userId);
-
-  for (const candidateId of candidates) {
-    const [candidate] = await tx.select().from(schema.user).where(eq(schema.user.id, candidateId));
-    if (!candidate || candidate.banned) continue;
+  const qualified: string[] = [];
+  for (const candidateId of await assigneesOf(tx, completed.id)) {
+    if (!(await isActive(tx, candidateId))) continue;
     const overlap = await tx
       .select({ skillId: schema.stageSkills.skillId })
       .from(schema.stageSkills)
@@ -49,9 +63,11 @@ async function resolveNextAssignee(
       )
       .where(eq(schema.stageSkills.stageId, next.stageId))
       .limit(1);
-    if (overlap.length > 0) return { assigneeId: candidateId, route: "same_person" };
+    if (overlap.length > 0) qualified.push(candidateId);
   }
-  return { assigneeId: null, route: null };
+  return qualified.length > 0
+    ? { assigneeIds: qualified, route: "same_person" }
+    : { assigneeIds: [], route: null };
 }
 
 /**
@@ -73,12 +89,14 @@ export async function previewHandoff(dbc: Db, taskId: string) {
   if (!next) return { kind: "last_stage" as const };
   if (next.status !== "waiting") return { kind: "already_active" as const, nextTaskId: next.id };
 
-  const { assigneeId, route } = await resolveNextAssignee(dbc, task, next);
-  let assigneeName: string | null = null;
-  if (assigneeId) {
-    const [u] = await dbc.select().from(schema.user).where(eq(schema.user.id, assigneeId));
-    assigneeName = u?.name ?? null;
-  }
+  const { assigneeIds, route } = await resolveNextAssignees(dbc, task, next);
+  const assignees =
+    assigneeIds.length === 0
+      ? []
+      : await dbc
+          .select({ id: schema.user.id, name: schema.user.name })
+          .from(schema.user)
+          .where(inArray(schema.user.id, assigneeIds));
   let defaultDeadline = next.deadline;
   if (!defaultDeadline && next.stageId) {
     const [stage] = await dbc.select().from(schema.stages).where(eq(schema.stages.id, next.stageId));
@@ -87,10 +105,10 @@ export async function previewHandoff(dbc: Db, taskId: string) {
   return {
     kind: "handoff" as const,
     nextTaskId: next.id,
-    nextTitle: next.title,
+    nextLabel: await labelOfStage(dbc, next.stageId),
     route: route ?? ("unassigned" as const),
-    assigneeId,
-    assigneeName,
+    assignees,
+    defaultStartDate: next.startDate ?? todayISO(env.TZ_BUSINESS),
     defaultDeadline,
   };
 }
@@ -100,9 +118,9 @@ export async function previewHandoff(dbc: Db, taskId: string) {
  * immediately after a task's status was conditionally updated to 'done'.
  *
  * Assignment resolution order (deliberate refinement, PLAN.md §4.1 note):
- *   A. explicit pre-assignment on the successor (if that user is active)
- *   B. completer holds a qualifying skill → keeps the job
- *   C. unassigned queue + admin notification
+ *   A. explicit pre-assignment on the successor (active people only)
+ *   B. whoever completed this task and holds a qualifying skill keeps the job
+ *   C. unassigned queue + a notification to whoever can assign
  */
 export async function runHandoff(tx: Tx, completed: TaskRow, actorId: string | null) {
   if (completed.chainPosition === null) return; // ad-hoc task: no chain
@@ -125,48 +143,42 @@ export async function runHandoff(tx: Tx, completed: TaskRow, actorId: string | n
 
   if (next.status !== "waiting") return; // already activated (e.g. re-completion after reopen)
 
-  // --- resolve assignee (rules A/B shared with previewHandoff) --------------
-  if (next.assigneeId) {
-    const [pre] = await tx.select().from(schema.user).where(eq(schema.user.id, next.assigneeId));
-    if (!pre || pre.banned) {
-      await logActivity(tx, {
-        actorId: null,
-        entityType: "task",
-        entityId: next.id,
-        action: "assignment_cleared",
-        detail: { reason: "assignee_inactive", previousAssignee: next.assigneeId },
-      });
-      next.assigneeId = null;
-    }
+  // --- resolve assignees (rules A/B shared with previewHandoff) -------------
+  const preAssigned = await assigneesOf(tx, next.id);
+  const { assigneeIds, route } = await resolveNextAssignees(tx, completed, next);
+  const dropped = preAssigned.filter((id) => !assigneeIds.includes(id));
+  if (dropped.length > 0) {
+    await logActivity(tx, {
+      actorId: null,
+      entityType: "task",
+      entityId: next.id,
+      action: "assignment_cleared",
+      detail: { reason: "assignee_inactive", previousAssignees: dropped },
+    });
   }
-  const { assigneeId, route } = await resolveNextAssignee(tx, completed, next);
 
   // --- activate the successor ----------------------------------------------
   const today = todayISO(env.TZ_BUSINESS);
+  const startDate = next.startDate ?? today;
   let deadline = next.deadline; // never overwrite an explicitly set deadline
   let reminderRule = "none";
   if (next.stageId) {
     const [stage] = await tx.select().from(schema.stages).where(eq(schema.stages.id, next.stageId));
     if (stage) {
       reminderRule = stage.reminderRule;
-      if (!deadline) deadline = addDaysISO(today, stage.defaultDurationDays);
+      if (!deadline) deadline = addDaysISO(startDate, stage.defaultDurationDays);
     }
   }
 
   await tx
     .update(schema.tasks)
-    .set({
-      status: "todo",
-      activatedAt: new Date(),
-      startDate: today,
-      deadline,
-      assigneeId,
-    })
+    .set({ status: "todo", activatedAt: new Date(), startDate, deadline })
     .where(eq(schema.tasks.id, next.id));
-  if (assigneeId) {
+  await tx.delete(schema.taskAssignees).where(eq(schema.taskAssignees.taskId, next.id));
+  if (assigneeIds.length > 0) {
     await tx
       .insert(schema.taskAssignees)
-      .values({ taskId: next.id, userId: assigneeId })
+      .values(assigneeIds.map((userId) => ({ taskId: next.id, userId })))
       .onConflictDoNothing();
   }
 
@@ -183,26 +195,26 @@ export async function runHandoff(tx: Tx, completed: TaskRow, actorId: string | n
     .from(schema.projects)
     .where(eq(schema.projects.id, completed.projectId));
   const projectTitle = project?.title ?? "project";
+  const label = await labelOfStage(tx, next.stageId);
 
-  if (assigneeId) {
-    await scheduleStageAutoReminder(
-      tx,
-      { id: next.id, assigneeId, deadline, title: next.title },
-      reminderRule,
-    );
-    await notifyUser(tx, assigneeId, {
-      type: "task_assigned",
-      title: `New task: ${next.title} — ${projectTitle}`,
-      body: deadline ? `Due ${deadline}` : undefined,
-      entityType: "task",
-      entityId: next.id,
-    });
+  if (assigneeIds.length > 0) {
+    await scheduleStageAutoReminder(tx, { id: next.id, assigneeIds, deadline, label }, reminderRule);
+    for (const userId of assigneeIds) {
+      await notifyUser(tx, userId, {
+        type: "task_assigned",
+        title: `New task: ${label} — ${projectTitle}`,
+        body: deadline ? `Due ${deadline}` : undefined,
+        entityType: "task",
+        entityId: next.id,
+      });
+    }
   } else {
-    await notifyAdmins(
+    await notifyResponsible(
       tx,
+      "tasks.assign",
       {
         type: "handoff_unassigned",
-        title: `Unassigned: ${next.title} for ${projectTitle} needs a person`,
+        title: `Unassigned: ${label} for ${projectTitle} needs a person`,
         entityType: "task",
         entityId: next.id,
       },
@@ -240,7 +252,7 @@ async function maybeCompleteProject(tx: Tx, projectId: string) {
     action: "status_changed",
     detail: { from: "active", to: "completed", reason: "all_stages_done" },
   });
-  await notifyAdmins(tx, {
+  await notifyResponsible(tx, "projects.manage", {
     type: "project_completed",
     title: `${project.title} is complete 🎉`,
     entityType: "project",
@@ -275,16 +287,16 @@ export async function handleReopen(tx: Tx, reopened: TaskRow, actorId: string) {
   if (!next || next.status === "waiting") return;
 
   if (next.status === "todo") {
-    // untouched successor → revert to waiting; auto-set deadline is cleared,
-    // an admin-set deadline survives (detected via the audit trail)
-    const manualDeadline = await tx
+    // untouched successor → revert to waiting; auto-set dates are cleared, an
+    // explicitly set schedule survives (detected via the audit trail)
+    const manualSchedule = await tx
       .select({ id: schema.activityLog.id })
       .from(schema.activityLog)
       .where(
         and(
           eq(schema.activityLog.entityType, "task"),
           eq(schema.activityLog.entityId, next.id),
-          eq(schema.activityLog.action, "deadline_changed"),
+          eq(schema.activityLog.action, "schedule_changed"),
           isNotNull(schema.activityLog.actorId),
         ),
       )
@@ -294,8 +306,7 @@ export async function handleReopen(tx: Tx, reopened: TaskRow, actorId: string) {
       .set({
         status: "waiting",
         activatedAt: null,
-        startDate: null,
-        ...(manualDeadline.length === 0 ? { deadline: null } : {}),
+        ...(manualSchedule.length === 0 ? { startDate: null, deadline: null } : {}),
       })
       .where(eq(schema.tasks.id, next.id));
     await tx
@@ -331,9 +342,9 @@ export async function handleReopen(tx: Tx, reopened: TaskRow, actorId: string) {
     action: "reopen_conflict",
     detail: { reopened: reopened.id, successor: next.id },
   });
-  await notifyAdmins(tx, {
+  await notifyResponsible(tx, "tasks.manage", {
     type: "reopen_conflict",
-    title: `Untangle: "${reopened.title}" reopened but "${next.title}" already started`,
+    title: `Untangle: "${await labelOfStage(tx, reopened.stageId)}" reopened but "${await labelOfStage(tx, next.stageId)}" already started`,
     entityType: "task",
     entityId: next.id,
   });

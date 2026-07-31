@@ -8,6 +8,96 @@ import { z } from "zod";
 export const ROLES = ["admin", "member"] as const;
 export type Role = (typeof ROLES)[number];
 
+// ---------------------------------------------------------------------------
+// Per-user authorization (owner request: "authorization should be customized
+// per user"). Role stays the coarse switch — an admin implicitly holds every
+// permission — while each member is granted exactly the capabilities they need.
+// ---------------------------------------------------------------------------
+
+export const PERMISSIONS = [
+  "projects.manage",
+  "tasks.manage",
+  "tasks.assign",
+  "tasks.approve",
+  "team.viewAll",
+  "money.view",
+  "money.manage",
+  "settings.workflows",
+  "settings.team",
+] as const;
+export type Permission = (typeof PERMISSIONS)[number];
+
+export const PERMISSION_GROUPS: {
+  title: string;
+  items: { key: Permission; label: string; hint: string }[];
+}[] = [
+  {
+    title: "Work",
+    items: [
+      {
+        key: "projects.manage",
+        label: "Manage projects",
+        hint: "Create and edit projects and clients",
+      },
+      {
+        key: "tasks.manage",
+        label: "Manage tasks",
+        hint: "Add tasks, change dates, flag and delete",
+      },
+      { key: "tasks.assign", label: "Assign people", hint: "Change who works on a task" },
+      {
+        key: "tasks.approve",
+        label: "Approve work",
+        hint: "Approve submitted work and reopen finished tasks",
+      },
+      {
+        key: "team.viewAll",
+        label: "See everyone's work",
+        hint: "The whole team's calendar, not just their own",
+      },
+    ],
+  },
+  {
+    title: "Money",
+    items: [
+      { key: "money.view", label: "See the money", hint: "Budgets, ledgers and the money screen" },
+      {
+        key: "money.manage",
+        label: "Manage the money",
+        hint: "Record income and expenses, decide requests",
+      },
+    ],
+  },
+  {
+    title: "Settings",
+    items: [
+      { key: "settings.workflows", label: "Edit workflows", hint: "Stages, skills and flows" },
+      { key: "settings.team", label: "Manage the team", hint: "Add members, reset passwords, set permissions" },
+    ],
+  },
+];
+
+export const PERMISSION_LABELS: Record<Permission, string> = Object.fromEntries(
+  PERMISSION_GROUPS.flatMap((g) => g.items.map((i) => [i.key, i.label])),
+) as Record<Permission, string>;
+
+/** Admins hold everything; members hold exactly what was granted to them. */
+export function can(
+  viewer: { role: Role; permissions?: readonly Permission[] } | null | undefined,
+  permission: Permission,
+): boolean {
+  if (!viewer) return false;
+  if (viewer.role === "admin") return true;
+  return viewer.permissions?.includes(permission) ?? false;
+}
+
+export function canAny(
+  viewer: { role: Role; permissions?: readonly Permission[] } | null | undefined,
+  permissions: readonly Permission[],
+): boolean {
+  return permissions.some((p) => can(viewer, p));
+}
+
 export const PROJECT_STATUSES = ["active", "on_hold", "completed", "archived"] as const;
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 
@@ -97,6 +187,14 @@ export const zPassword = z.string().min(10, "At least 10 characters").max(128);
 // ---------------------------------------------------------------------------
 // Display helpers kept next to the enums so web and email templates agree
 // ---------------------------------------------------------------------------
+
+/**
+ * Tasks carry no title of their own (owner request: "remove the title") — the
+ * stage they belong to names them, and the project supplies the context.
+ */
+export function taskLabel(stageName: string | null | undefined): string {
+  return stageName ?? "Task";
+}
 
 export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   waiting: "Not started",

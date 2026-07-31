@@ -1,24 +1,36 @@
 import { schema } from "@mams/db";
-import { isLegalTransition, type Checklist, type TaskStatus } from "@mams/shared";
+import {
+  can,
+  isLegalTransition,
+  taskLabel,
+  type Checklist,
+  type Permission,
+  type TaskStatus,
+} from "@mams/shared";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, lt, notExists, sql } from "drizzle-orm";
 import { db } from "../db";
 import { env } from "../env";
 import { addDaysISO, todayISO } from "../lib/time";
 import { logActivity } from "./activity";
 import { handleReopen, runHandoff } from "./handoff-engine";
-import { notifyAdmins, notifyUser } from "./notify";
-import {
-  cancelAutoReminders,
-  retargetAutoReminders,
-  scheduleStageAutoReminder,
-} from "./reminder-service";
+import { notifyResponsible, notifyUser } from "./notify";
+import { cancelAutoReminders, scheduleStageAutoReminder } from "./reminder-service";
 
 const { tasks, projects, clients, stages, user, taskAssignees } = schema;
 
-type Actor = { id: string; role: "admin" | "member"; name: string };
+type Actor = {
+  id: string;
+  role: "admin" | "member";
+  name: string;
+  permissions: readonly Permission[];
+};
 
-/** Owner or helper? (tasks.assignee_id is always mirrored into task_assignees) */
+function assertCan(actor: Actor, permission: Permission) {
+  if (!can(actor, permission)) throw new TRPCError({ code: "FORBIDDEN" });
+}
+
+/** Is this person on the task? Assignees are equals — there is no owner. */
 async function isOnTask(dbc: typeof db, taskId: string, userId: string) {
   const [row] = await dbc
     .select({ userId: taskAssignees.userId })
@@ -28,18 +40,38 @@ async function isOnTask(dbc: typeof db, taskId: string, userId: string) {
   return !!row;
 }
 
-/** Helpers (non-owner assignees) with names, for a set of tasks. */
-async function helpersFor(taskIds: string[]) {
+async function assigneeIdsOf(dbc: typeof db, taskId: string): Promise<string[]> {
+  const rows = await dbc
+    .select({ userId: taskAssignees.userId })
+    .from(taskAssignees)
+    .where(eq(taskAssignees.taskId, taskId));
+  return rows.map((r) => r.userId);
+}
+
+/** Everyone on each of these tasks, with names, in one round trip. */
+async function assigneesFor(taskIds: string[]) {
   if (taskIds.length === 0) return [];
   return db
-    .select({
-      taskId: taskAssignees.taskId,
-      userId: taskAssignees.userId,
-      name: user.name,
-    })
+    .select({ taskId: taskAssignees.taskId, userId: taskAssignees.userId, name: user.name })
     .from(taskAssignees)
     .innerJoin(user, eq(taskAssignees.userId, user.id))
-    .where(inArray(taskAssignees.taskId, taskIds));
+    .where(inArray(taskAssignees.taskId, taskIds))
+    .orderBy(user.name);
+}
+
+type TaskRowBase = { id: string };
+
+/** Attach the assignee list to task rows so no caller has to fan out itself. */
+async function withAssignees<T extends TaskRowBase>(rows: T[]) {
+  const links = await assigneesFor(rows.map((r) => r.id));
+  return rows.map((row) => {
+    const mine = links.filter((l) => l.taskId === row.id);
+    return {
+      ...row,
+      assignees: mine.map((l) => ({ id: l.userId, name: l.name })),
+      assigneeIds: mine.map((l) => l.userId),
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -49,7 +81,6 @@ async function helpersFor(taskIds: string[]) {
 const taskListSelect = {
   id: tasks.id,
   projectId: tasks.projectId,
-  title: tasks.title,
   status: tasks.status,
   chainPosition: tasks.chainPosition,
   deadline: tasks.deadline,
@@ -57,13 +88,11 @@ const taskListSelect = {
   flagged: tasks.flagged,
   flagNote: tasks.flagNote,
   requiresApproval: tasks.requiresApproval,
-  assigneeId: tasks.assigneeId,
   checklist: tasks.checklist,
   driveLink: tasks.driveLink,
   projectTitle: projects.title,
   clientName: clients.name,
   stageName: stages.name,
-  assigneeName: user.name,
 } as const;
 
 function taskListQuery() {
@@ -72,29 +101,32 @@ function taskListQuery() {
     .from(tasks)
     .innerJoin(projects, eq(tasks.projectId, projects.id))
     .innerJoin(clients, eq(projects.clientId, clients.id))
-    .leftJoin(stages, eq(tasks.stageId, stages.id))
-    .leftJoin(user, eq(tasks.assigneeId, user.id));
+    .leftJoin(stages, eq(tasks.stageId, stages.id));
 }
 
-/** My Work (PLAN.md §8.2): open tasks + last 7 days of done — owner OR helper. */
+/** Tasks this person is on. */
+function onTaskOf(userId: string) {
+  return sql`EXISTS (SELECT 1 FROM ${taskAssignees} ta WHERE ta.task_id = ${tasks.id} AND ta.user_id = ${userId})`;
+}
+
+/** My Work (PLAN.md §8.2): open tasks + the last 7 days of done. */
 export async function myWork(userId: string) {
   const weekAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000);
   const rows = await taskListQuery()
-    .innerJoin(
-      taskAssignees,
-      and(eq(taskAssignees.taskId, tasks.id), eq(taskAssignees.userId, userId)),
-    )
     .where(
-      sql`(${tasks.status} IN ('todo','in_progress','awaiting_approval') OR (${tasks.status} = 'done' AND ${tasks.completedAt} >= ${weekAgo}))`,
+      and(
+        onTaskOf(userId),
+        sql`(${tasks.status} IN ('todo','in_progress','awaiting_approval') OR (${tasks.status} = 'done' AND ${tasks.completedAt} >= ${weekAgo}))`,
+      ),
     )
     .orderBy(sql`${tasks.deadline} ASC NULLS LAST`);
-  return { today: todayISO(env.TZ_BUSINESS), tasks: rows };
+  return { today: todayISO(env.TZ_BUSINESS), tasks: await withAssignees(rows) };
 }
 
 /**
  * Calendar feed: open tasks overlapping [from, to] by their start→deadline
  * span (tasks without a deadline are excluded — nothing to place on a day).
- * Members see their own; admin sees everyone (optionally one person).
+ * Seeing the whole team is a permission (`team.viewAll`), not a role.
  */
 export async function calendar(viewer: Actor, input: { from: string; to: string; userId?: string }) {
   const conds = [
@@ -103,16 +135,12 @@ export async function calendar(viewer: Actor, input: { from: string; to: string;
     sql`COALESCE(${tasks.startDate}, ${tasks.deadline}) <= ${input.to}`,
     gte(tasks.deadline, input.from),
   ];
-  const scopeUser = viewer.role === "admin" ? input.userId : viewer.id;
-  let query = taskListQuery();
-  if (scopeUser) {
-    query = query.innerJoin(
-      taskAssignees,
-      and(eq(taskAssignees.taskId, tasks.id), eq(taskAssignees.userId, scopeUser)),
-    ) as typeof query;
-  }
-  const rows = await query.where(and(...conds)).orderBy(sql`${tasks.deadline} ASC`);
-  return { today: todayISO(env.TZ_BUSINESS), tasks: rows };
+  const scopeUser = can(viewer, "team.viewAll") ? input.userId : viewer.id;
+  if (scopeUser) conds.push(onTaskOf(scopeUser));
+  const rows = await taskListQuery()
+    .where(and(...conds))
+    .orderBy(sql`${tasks.deadline} ASC`);
+  return { today: todayISO(env.TZ_BUSINESS), tasks: await withAssignees(rows) };
 }
 
 export async function listTasks(filters: {
@@ -127,13 +155,21 @@ export async function listTasks(filters: {
 }) {
   const conds = [];
   if (filters.projectId) conds.push(eq(tasks.projectId, filters.projectId));
-  if (filters.assigneeId) conds.push(eq(tasks.assigneeId, filters.assigneeId));
+  if (filters.assigneeId) conds.push(onTaskOf(filters.assigneeId));
   if (filters.stageId) conds.push(eq(tasks.stageId, filters.stageId));
   if (filters.clientId) conds.push(eq(projects.clientId, filters.clientId));
   if (filters.status) conds.push(eq(tasks.status, filters.status));
   if (filters.flagged) conds.push(eq(tasks.flagged, true));
-  if (filters.unassigned)
-    conds.push(and(isNull(tasks.assigneeId), inArray(tasks.status, ["todo", "in_progress"])));
+  if (filters.unassigned) {
+    conds.push(
+      and(
+        notExists(
+          db.select({ n: sql`1` }).from(taskAssignees).where(eq(taskAssignees.taskId, tasks.id)),
+        ),
+        inArray(tasks.status, ["todo", "in_progress"]),
+      ),
+    );
+  }
   if (filters.overdue) {
     conds.push(
       and(
@@ -142,25 +178,53 @@ export async function listTasks(filters: {
       ),
     );
   }
-  return taskListQuery()
+  const rows = await taskListQuery()
     .where(conds.length ? and(...conds) : undefined)
     .orderBy(sql`${tasks.deadline} ASC NULLS LAST`)
     .limit(500);
+  return withAssignees(rows);
 }
 
 export async function getTask(id: string) {
   const [row] = await taskListQuery().where(eq(tasks.id, id));
   if (!row) throw new TRPCError({ code: "NOT_FOUND" });
   const [full] = await db.select().from(tasks).where(eq(tasks.id, id));
-  const helpers = (await helpersFor([id])).filter((h) => h.userId !== row.assigneeId);
+  const [withPeople] = await withAssignees([row]);
   return {
-    ...row,
+    ...withPeople!,
     details: full!.details,
+    stageId: full!.stageId,
     createdAt: full!.createdAt,
     activatedAt: full!.activatedAt,
     completedAt: full!.completedAt,
-    helpers: helpers.map((h) => ({ id: h.userId, name: h.name })),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers for the mutations below
+// ---------------------------------------------------------------------------
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** The task's display name — its stage. */
+async function labelOf(tx: Tx, task: { stageId: string | null }): Promise<string> {
+  if (!task.stageId) return taskLabel(null);
+  const [stage] = await tx.select().from(stages).where(eq(stages.id, task.stageId));
+  return taskLabel(stage?.name ?? null);
+}
+
+async function reminderRuleOf(tx: Tx, stageId: string | null): Promise<string> {
+  if (!stageId) return "none";
+  const [stage] = await tx.select().from(stages).where(eq(stages.id, stageId));
+  return stage?.reminderRule ?? "none";
+}
+
+async function assigneesInTx(tx: Tx, taskId: string): Promise<string[]> {
+  const rows = await tx
+    .select({ userId: taskAssignees.userId })
+    .from(taskAssignees)
+    .where(eq(taskAssignees.taskId, taskId));
+  return rows.map((r) => r.userId);
 }
 
 // ---------------------------------------------------------------------------
@@ -173,29 +237,29 @@ export async function transition(taskId: string, to: TaskStatus, actor: Actor) {
     if (!task) throw new TRPCError({ code: "NOT_FOUND" });
 
     const from = task.status as TaskStatus;
+    const label = await labelOf(tx, task);
+    const canApprove = can(actor, "tasks.approve");
+    const canManage = can(actor, "tasks.manage");
     let target = to;
 
-    // member "done" on an approval-gated task becomes an approval request
-    if (
-      target === "done" &&
-      task.requiresApproval &&
-      actor.role !== "admin" &&
-      from === "in_progress"
-    ) {
+    // "done" on an approval-gated task becomes an approval request unless the
+    // person is allowed to approve
+    if (target === "done" && task.requiresApproval && !canApprove && from === "in_progress") {
       target = "awaiting_approval";
     }
 
     // --- object-level authorization (PLAN.md §3) ---------------------------
-    if (actor.role !== "admin") {
-      const onTask = task.assigneeId === actor.id || (await isOnTask(db, taskId, actor.id));
-      const memberAllowed =
-        onTask &&
-        ((from === "todo" && target === "in_progress") ||
-          (from === "in_progress" && (target === "done" || target === "awaiting_approval")));
-      if (!memberAllowed) throw new TRPCError({ code: "FORBIDDEN" });
-    } else if (from === "todo" && target === "waiting") {
-      // system-only transition; not even the admin may request it
+    const onTask = await isOnTask(db, taskId, actor.id);
+    if (from === "todo" && target === "waiting") {
+      // system-only transition; nobody may request it
       throw new TRPCError({ code: "BAD_REQUEST", message: "Illegal transition" });
+    }
+    if (from === "waiting" && target === "todo") {
+      if (!canManage) throw new TRPCError({ code: "FORBIDDEN" });
+    } else if (from === "awaiting_approval" || (from === "done" && target === "in_progress")) {
+      if (!canApprove) throw new TRPCError({ code: "FORBIDDEN" });
+    } else if (!onTask && !canManage) {
+      throw new TRPCError({ code: "FORBIDDEN" });
     }
 
     if (!isLegalTransition(from, target)) {
@@ -219,11 +283,12 @@ export async function transition(taskId: string, to: TaskStatus, actor: Actor) {
         detail: { from, to: "done" },
       });
       await cancelAutoReminders(tx, taskId);
-      await notifyAdmins(
+      await notifyResponsible(
         tx,
+        "tasks.manage",
         {
           type: "stage_completed",
-          title: `${actor.name} finished "${task.title}"`,
+          title: `${actor.name} finished "${label}"`,
           entityType: "task",
           entityId: taskId,
         },
@@ -234,28 +299,27 @@ export async function transition(taskId: string, to: TaskStatus, actor: Actor) {
     }
 
     if (from === "waiting" && target === "todo") {
-      // manual activation by admin — same activation semantics as a handoff
+      // manual activation — same activation semantics as a handoff
       const today = todayISO(env.TZ_BUSINESS);
       let deadline = task.deadline;
-      let reminderRule = "none";
-      if (task.stageId) {
+      if (!deadline && task.stageId) {
         const [stage] = await tx.select().from(stages).where(eq(stages.id, task.stageId));
-        if (stage) {
-          reminderRule = stage.reminderRule;
-          if (!deadline) deadline = addDaysISO(today, stage.defaultDurationDays);
-        }
+        if (stage) deadline = addDaysISO(task.startDate ?? today, stage.defaultDurationDays);
       }
       await tx
         .update(tasks)
-        .set({ status: "todo", activatedAt: new Date(), startDate: today, deadline })
+        .set({
+          status: "todo",
+          activatedAt: new Date(),
+          startDate: task.startDate ?? today,
+          deadline,
+        })
         .where(eq(tasks.id, taskId));
-      if (task.assigneeId) {
-        await scheduleStageAutoReminder(
-          tx,
-          { id: taskId, assigneeId: task.assigneeId, deadline, title: task.title },
-          reminderRule,
-        );
-      }
+      await scheduleStageAutoReminder(
+        tx,
+        { id: taskId, assigneeIds: await assigneesInTx(tx, taskId), deadline, label },
+        await reminderRuleOf(tx, task.stageId),
+      );
     } else if (from === "done" && target === "in_progress") {
       await tx
         .update(tasks)
@@ -263,15 +327,16 @@ export async function transition(taskId: string, to: TaskStatus, actor: Actor) {
         .where(eq(tasks.id, taskId));
       await handleReopen(tx, task, actor.id);
     } else if (from === "awaiting_approval" && target === "in_progress") {
-      // admin rejection → back to work, flagged
+      // rejection → back to work, flagged
       await tx
         .update(tasks)
         .set({ status: "in_progress", flagged: true })
         .where(eq(tasks.id, taskId));
-      if (task.assigneeId) {
-        await notifyUser(tx, task.assigneeId, {
+      for (const userId of await assigneesInTx(tx, taskId)) {
+        if (userId === actor.id) continue;
+        await notifyUser(tx, userId, {
           type: "task_flagged",
-          title: `Changes requested: "${task.title}"`,
+          title: `Changes requested: "${label}"`,
           entityType: "task",
           entityId: taskId,
         });
@@ -279,11 +344,12 @@ export async function transition(taskId: string, to: TaskStatus, actor: Actor) {
     } else {
       await tx.update(tasks).set({ status: target }).where(eq(tasks.id, taskId));
       if (target === "awaiting_approval") {
-        await notifyAdmins(
+        await notifyResponsible(
           tx,
+          "tasks.approve",
           {
             type: "approval_requested",
-            title: `Awaiting approval: "${task.title}"`,
+            title: `Awaiting approval: "${label}"`,
             entityType: "task",
             entityId: taskId,
           },
@@ -304,204 +370,178 @@ export async function transition(taskId: string, to: TaskStatus, actor: Actor) {
 }
 
 // ---------------------------------------------------------------------------
-// Admin mutations
+// Managing mutations (each gated on its own permission)
 // ---------------------------------------------------------------------------
 
 export async function createAdhocTask(
   actor: Actor,
   input: {
     projectId: string;
-    title: string;
+    stageId?: string;
     details?: string;
-    assigneeId?: string;
+    assigneeIds?: string[];
+    startDate?: string;
     deadline?: string;
     driveLink?: string;
   },
 ) {
+  assertCan(actor, "tasks.manage");
   return db.transaction(async (tx) => {
+    const today = todayISO(env.TZ_BUSINESS);
     const [row] = await tx
       .insert(tasks)
       .values({
         projectId: input.projectId,
-        title: input.title,
+        stageId: input.stageId ?? null,
         details: input.details ?? null,
-        assigneeId: input.assigneeId ?? null,
+        startDate: input.startDate ?? today,
         deadline: input.deadline ?? null,
         driveLink: input.driveLink ?? null,
         status: "todo",
         activatedAt: new Date(),
-        startDate: todayISO(env.TZ_BUSINESS),
         createdBy: actor.id,
       })
       .returning();
-    if (input.assigneeId) {
-      await tx
-        .insert(taskAssignees)
-        .values({ taskId: row!.id, userId: input.assigneeId })
-        .onConflictDoNothing();
-    }
+    const assigneeIds = await replaceAssignees(tx, row!.id, input.assigneeIds ?? []);
+    const label = await labelOf(tx, row!);
     await logActivity(tx, {
       actorId: actor.id,
       entityType: "task",
       entityId: row!.id,
       action: "created",
-      detail: { adhoc: true },
+      detail: { adhoc: true, label },
     });
-    if (input.assigneeId) {
-      await notifyUser(tx, input.assigneeId, {
+    for (const userId of assigneeIds) {
+      if (userId === actor.id) continue;
+      await notifyUser(tx, userId, {
         type: "task_assigned",
-        title: `New task: ${input.title}`,
-        body: input.deadline ? `Due ${input.deadline}` : undefined,
+        title: `New task: ${label}`,
+        body: row!.deadline ? `Due ${row!.deadline}` : undefined,
         entityType: "task",
         entityId: row!.id,
       });
     }
+    await scheduleStageAutoReminder(
+      tx,
+      { id: row!.id, assigneeIds, deadline: row!.deadline, label },
+      await reminderRuleOf(tx, row!.stageId),
+    );
     return row!;
   });
 }
 
-export async function assign(actor: Actor, input: { id: string; assigneeId: string | null }) {
-  return db.transaction(async (tx) => {
-    const [task] = await tx.select().from(tasks).where(eq(tasks.id, input.id)).for("update");
-    if (!task) throw new TRPCError({ code: "NOT_FOUND" });
-    if (input.assigneeId) {
-      const [assignee] = await tx.select().from(user).where(eq(user.id, input.assigneeId));
-      if (!assignee || assignee.banned) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Assignee is not an active user" });
-      }
+/** Set the exact set of people on a task; returns the validated set. */
+async function replaceAssignees(tx: Tx, taskId: string, userIds: string[]): Promise<string[]> {
+  const wanted = [...new Set(userIds)];
+  if (wanted.length > 0) {
+    const active = await tx
+      .select({ id: user.id })
+      .from(user)
+      .where(and(inArray(user.id, wanted), eq(user.banned, false)));
+    if (active.length !== wanted.length) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Everyone assigned must be an active user" });
     }
-    await tx.update(tasks).set({ assigneeId: input.assigneeId }).where(eq(tasks.id, input.id));
-    // keep task_assignees mirrored: old owner off (helpers stay), new owner on
-    if (task.assigneeId && task.assigneeId !== input.assigneeId) {
-      await tx
-        .delete(taskAssignees)
-        .where(and(eq(taskAssignees.taskId, input.id), eq(taskAssignees.userId, task.assigneeId)));
-    }
-    if (input.assigneeId) {
-      await tx
-        .insert(taskAssignees)
-        .values({ taskId: input.id, userId: input.assigneeId })
-        .onConflictDoNothing();
-    }
-    await logActivity(tx, {
-      actorId: actor.id,
-      entityType: "task",
-      entityId: input.id,
-      action: "assigned",
-      detail: { from: task.assigneeId, to: input.assigneeId },
-    });
-    if (input.assigneeId && task.status !== "waiting") {
-      await retargetAutoReminders(tx, input.id, input.assigneeId);
-      if (input.assigneeId !== actor.id) {
-        await notifyUser(tx, input.assigneeId, {
-          type: "task_assigned",
-          title: `New task: ${task.title}`,
-          body: task.deadline ? `Due ${task.deadline}` : undefined,
-          entityType: "task",
-          entityId: input.id,
-        });
-      }
-      // activation may have skipped scheduling (no assignee then) — ensure it now
-      if (task.stageId && task.deadline) {
-        const [stage] = await tx.select().from(stages).where(eq(stages.id, task.stageId));
-        if (stage) {
-          await scheduleStageAutoReminder(
-            tx,
-            { id: input.id, assigneeId: input.assigneeId, deadline: task.deadline, title: task.title },
-            stage.reminderRule,
-          );
-        }
-      }
-    }
-  });
+  }
+  await tx.delete(taskAssignees).where(eq(taskAssignees.taskId, taskId));
+  if (wanted.length > 0) {
+    await tx
+      .insert(taskAssignees)
+      .values(wanted.map((userId) => ({ taskId, userId })))
+      .onConflictDoNothing();
+  }
+  return wanted;
 }
 
-/** Replace the helper set (owner is managed by assign(), never touched here). */
-export async function setHelpers(actor: Actor, input: { id: string; userIds: string[] }) {
+/**
+ * Replace the people on a task. Everyone listed is an equal assignee — there
+ * is no owner, so this one call covers what assign()/setHelpers() used to do.
+ */
+export async function setAssignees(actor: Actor, input: { id: string; userIds: string[] }) {
+  assertCan(actor, "tasks.assign");
   return db.transaction(async (tx) => {
     const [task] = await tx.select().from(tasks).where(eq(tasks.id, input.id)).for("update");
     if (!task) throw new TRPCError({ code: "NOT_FOUND" });
-    const helperIds = [...new Set(input.userIds)].filter((id) => id !== task.assigneeId);
-    if (helperIds.length > 0) {
-      const activeUsers = await tx
-        .select({ id: user.id })
-        .from(user)
-        .where(and(inArray(user.id, helperIds), eq(user.banned, false)));
-      if (activeUsers.length !== helperIds.length) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "All helpers must be active users" });
-      }
-    }
-    const existing = await tx
-      .select({ userId: taskAssignees.userId })
-      .from(taskAssignees)
-      .where(eq(taskAssignees.taskId, input.id));
-    const keep = new Set([...(task.assigneeId ? [task.assigneeId] : []), ...helperIds]);
-    const toRemove = existing.map((e) => e.userId).filter((id) => !keep.has(id));
-    const existingSet = new Set(existing.map((e) => e.userId));
-    const toAdd = helperIds.filter((id) => !existingSet.has(id));
+    const before = await assigneesInTx(tx, input.id);
+    const after = await replaceAssignees(tx, input.id, input.userIds);
+    const label = await labelOf(tx, task);
 
-    if (toRemove.length > 0) {
-      await tx
-        .delete(taskAssignees)
-        .where(and(eq(taskAssignees.taskId, input.id), inArray(taskAssignees.userId, toRemove)));
-    }
-    if (toAdd.length > 0) {
-      await tx
-        .insert(taskAssignees)
-        .values(toAdd.map((userId) => ({ taskId: input.id, userId })))
-        .onConflictDoNothing();
-    }
     await logActivity(tx, {
       actorId: actor.id,
       entityType: "task",
       entityId: input.id,
-      action: "helpers_changed",
-      detail: { helpers: helperIds },
+      action: "assignees_changed",
+      detail: { from: before, to: after },
     });
-    for (const userId of toAdd) {
-      if (userId !== actor.id && task.status !== "waiting") {
+
+    if (task.status !== "waiting") {
+      for (const userId of after) {
+        if (before.includes(userId) || userId === actor.id) continue;
         await notifyUser(tx, userId, {
           type: "task_assigned",
-          title: `You were added to: ${task.title}`,
+          title: `New task: ${label}`,
           body: task.deadline ? `Due ${task.deadline}` : undefined,
           entityType: "task",
           entityId: input.id,
         });
       }
+      await scheduleStageAutoReminder(
+        tx,
+        { id: input.id, assigneeIds: after, deadline: task.deadline, label },
+        await reminderRuleOf(tx, task.stageId),
+      );
     }
   });
 }
 
-export async function setDeadline(actor: Actor, input: { id: string; deadline: string | null }) {
+/**
+ * Start date + deadline in one call — the two ends of the same span, so they
+ * are never edited independently into an impossible order.
+ */
+export async function setSchedule(
+  actor: Actor,
+  input: { id: string; startDate?: string | null; deadline?: string | null },
+) {
+  assertCan(actor, "tasks.manage");
   return db.transaction(async (tx) => {
     const [task] = await tx.select().from(tasks).where(eq(tasks.id, input.id)).for("update");
     if (!task) throw new TRPCError({ code: "NOT_FOUND" });
-    await tx.update(tasks).set({ deadline: input.deadline }).where(eq(tasks.id, input.id));
+    const startDate = input.startDate === undefined ? task.startDate : input.startDate;
+    const deadline = input.deadline === undefined ? task.deadline : input.deadline;
+    if (startDate && deadline && startDate > deadline) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Start date must be on or before the deadline" });
+    }
+    await tx.update(tasks).set({ startDate, deadline }).where(eq(tasks.id, input.id));
     await logActivity(tx, {
       actorId: actor.id,
       entityType: "task",
       entityId: input.id,
-      action: "deadline_changed",
-      detail: { from: task.deadline, to: input.deadline },
+      action: "schedule_changed",
+      detail: {
+        from: { startDate: task.startDate, deadline: task.deadline },
+        to: { startDate, deadline },
+      },
     });
     if (task.status !== "waiting" && task.status !== "done") {
-      if (!input.deadline) {
+      if (!deadline) {
         await cancelAutoReminders(tx, input.id);
-      } else if (task.stageId && task.assigneeId) {
-        const [stage] = await tx.select().from(stages).where(eq(stages.id, task.stageId));
-        if (stage) {
-          await scheduleStageAutoReminder(
-            tx,
-            { id: input.id, assigneeId: task.assigneeId, deadline: input.deadline, title: task.title },
-            stage.reminderRule,
-          );
-        }
+      } else {
+        await scheduleStageAutoReminder(
+          tx,
+          {
+            id: input.id,
+            assigneeIds: await assigneesInTx(tx, input.id),
+            deadline,
+            label: await labelOf(tx, task),
+          },
+          await reminderRuleOf(tx, task.stageId),
+        );
       }
     }
   });
 }
 
 export async function setFlag(actor: Actor, input: { id: string; flagged: boolean; note?: string }) {
+  assertCan(actor, "tasks.manage");
   return db.transaction(async (tx) => {
     const [task] = await tx.select().from(tasks).where(eq(tasks.id, input.id)).for("update");
     if (!task) throw new TRPCError({ code: "NOT_FOUND" });
@@ -516,10 +556,13 @@ export async function setFlag(actor: Actor, input: { id: string; flagged: boolea
       action: input.flagged ? "flagged" : "unflagged",
       detail: { note: input.note },
     });
-    if (input.flagged && task.assigneeId && task.assigneeId !== actor.id) {
-      await notifyUser(tx, task.assigneeId, {
+    if (!input.flagged) return;
+    const label = await labelOf(tx, task);
+    for (const userId of await assigneesInTx(tx, input.id)) {
+      if (userId === actor.id) continue;
+      await notifyUser(tx, userId, {
         type: "task_flagged",
-        title: `⚑ Needs attention: "${task.title}"`,
+        title: `⚑ Needs attention: "${label}"`,
         body: input.note,
         entityType: "task",
         entityId: input.id,
@@ -530,13 +573,14 @@ export async function setFlag(actor: Actor, input: { id: string; flagged: boolea
 
 export async function updateDetails(
   actor: Actor,
-  input: { id: string; title?: string; details?: string | null },
+  input: { id: string; stageId?: string | null; details?: string | null },
 ) {
+  assertCan(actor, "tasks.manage");
   return db.transaction(async (tx) => {
     await tx
       .update(tasks)
       .set({
-        ...(input.title !== undefined ? { title: input.title } : {}),
+        ...(input.stageId !== undefined ? { stageId: input.stageId } : {}),
         ...(input.details !== undefined ? { details: input.details } : {}),
       })
       .where(eq(tasks.id, input.id));
@@ -550,6 +594,7 @@ export async function updateDetails(
 }
 
 export async function deleteTask(actor: Actor, id: string) {
+  assertCan(actor, "tasks.manage");
   return db.transaction(async (tx) => {
     const [task] = await tx.select().from(tasks).where(eq(tasks.id, id)).for("update");
     if (!task) throw new TRPCError({ code: "NOT_FOUND" });
@@ -559,23 +604,24 @@ export async function deleteTask(actor: Actor, id: string) {
         message: "Chain tasks cannot be deleted — archive the project instead",
       });
     }
+    const label = await labelOf(tx, task);
     await tx.delete(tasks).where(eq(tasks.id, id));
     await logActivity(tx, {
       actorId: actor.id,
       entityType: "task",
       entityId: id,
       action: "deleted",
-      detail: { title: task.title },
+      detail: { label },
     });
   });
 }
 
 // ---------------------------------------------------------------------------
-// Assignee-or-admin mutations (object-level check)
+// Assignee-or-manager mutations (object-level check)
 // ---------------------------------------------------------------------------
 
-async function assertCanTouch(taskId: string, task: { assigneeId: string | null }, actor: Actor) {
-  if (actor.role === "admin" || task.assigneeId === actor.id) return;
+async function assertCanTouch(taskId: string, actor: Actor) {
+  if (can(actor, "tasks.manage")) return;
   if (await isOnTask(db, taskId, actor.id)) return;
   throw new TRPCError({ code: "FORBIDDEN" });
 }
@@ -583,14 +629,14 @@ async function assertCanTouch(taskId: string, task: { assigneeId: string | null 
 export async function updateChecklist(actor: Actor, input: { id: string; checklist: Checklist }) {
   const [task] = await db.select().from(tasks).where(eq(tasks.id, input.id));
   if (!task) throw new TRPCError({ code: "NOT_FOUND" });
-  await assertCanTouch(input.id, task, actor);
+  await assertCanTouch(input.id, actor);
   await db.update(tasks).set({ checklist: input.checklist }).where(eq(tasks.id, input.id));
 }
 
 export async function setDriveLink(actor: Actor, input: { id: string; driveLink: string | null }) {
   const [task] = await db.select().from(tasks).where(eq(tasks.id, input.id));
   if (!task) throw new TRPCError({ code: "NOT_FOUND" });
-  await assertCanTouch(input.id, task, actor);
+  await assertCanTouch(input.id, actor);
   await db.update(tasks).set({ driveLink: input.driveLink }).where(eq(tasks.id, input.id));
   await logActivity(db, {
     actorId: actor.id,
@@ -599,3 +645,5 @@ export async function setDriveLink(actor: Actor, input: { id: string; driveLink:
     action: "drive_link_set",
   });
 }
+
+export { assigneeIdsOf };

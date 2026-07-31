@@ -1,27 +1,29 @@
+import { can, taskLabel, type TaskStatus } from "@mams/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Input, Label } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
-import { nextAction } from "@/components/task-bits";
+import { PeoplePicker } from "@/components/people-picker";
+import { nextAction, type Viewer } from "@/components/task-bits";
 import { formatShort } from "@/lib/dates";
 import { useTRPC } from "@/lib/trpc";
 
 type ActionTask = {
   id: string;
-  title: string;
-  status: "waiting" | "todo" | "in_progress" | "awaiting_approval" | "done";
-  assigneeId: string | null;
+  status: TaskStatus;
+  stageName: string | null;
+  assigneeIds: string[];
   requiresApproval: boolean;
   chainPosition?: number | null;
 };
 
 /**
  * The one primary action button (PLAN.md §8.1). Completing a chain task opens
- * the handoff dialog: "this finishes X — here's where it goes next", with the
- * admin able to change who/when right there.
+ * the handoff dialog: "this finishes X — here's where it goes next", with
+ * whoever may assign able to change the people and the dates right there.
  */
 export function TaskActionButton({
   task,
@@ -29,7 +31,7 @@ export function TaskActionButton({
   size = "sm",
 }: {
   task: ActionTask;
-  viewer: { id: string; role: "admin" | "member" };
+  viewer: Viewer;
   size?: "sm" | "md";
 }) {
   const trpc = useTRPC();
@@ -42,9 +44,6 @@ export function TaskActionButton({
   };
   const transition = useMutation(
     trpc.tasks.transition.mutationOptions({
-      onSuccess: (_, vars) => {
-        if (vars.to !== "done") return;
-      },
       onError: (err) => toast.error(err.message || "That didn't work — try again."),
       onSettled: invalidate,
     }),
@@ -53,6 +52,7 @@ export function TaskActionButton({
   const action = nextAction(task, viewer);
   if (!action) return null;
 
+  const label = taskLabel(task.stageName);
   const isChainCompletion =
     action.to === "done" && task.chainPosition !== null && task.chainPosition !== undefined;
 
@@ -64,9 +64,9 @@ export function TaskActionButton({
     await transition.mutateAsync({ id: task.id, to: action!.to });
     toast.success(
       action!.to === "in_progress" && task.status === "todo"
-        ? `Started "${task.title}"`
+        ? `Started "${label}"`
         : action!.to === "done"
-          ? `"${task.title}" completed ✓`
+          ? `"${label}" completed ✓`
           : "Done",
     );
   }
@@ -95,57 +95,65 @@ function CompleteDialog({
   onDone,
 }: {
   task: ActionTask;
-  viewer: { id: string; role: "admin" | "member" };
+  viewer: Viewer;
   onClose: () => void;
   onDone: () => void;
 }) {
   const trpc = useTRPC();
-  const isAdmin = viewer.role === "admin";
+  const canAssign = can(viewer, "tasks.assign");
+  const canSchedule = can(viewer, "tasks.manage");
   const preview = useQuery(trpc.tasks.handoffPreview.queryOptions({ id: task.id }));
-  const users = useQuery({ ...trpc.users.list.queryOptions(), enabled: isAdmin });
+  const users = useQuery(trpc.users.list.queryOptions());
 
-  const [overrideAssignee, setOverrideAssignee] = useState<string | null>(null);
+  const [overrideAssignees, setOverrideAssignees] = useState<string[] | null>(null);
+  const [overrideStart, setOverrideStart] = useState<string | null>(null);
   const [overrideDeadline, setOverrideDeadline] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const transition = useMutation(trpc.tasks.transition.mutationOptions());
-  const assign = useMutation(trpc.tasks.assign.mutationOptions());
-  const setDeadline = useMutation(trpc.tasks.setDeadline.mutationOptions());
+  const setAssignees = useMutation(trpc.tasks.setAssignees.mutationOptions());
+  const setSchedule = useMutation(trpc.tasks.setSchedule.mutationOptions());
 
   const p = preview.data;
-  const gated = task.requiresApproval && !isAdmin;
+  const label = taskLabel(task.stageName);
+  const gated = task.requiresApproval && !can(viewer, "tasks.approve");
+  const plannedAssignees =
+    p?.kind === "handoff" ? (overrideAssignees ?? p.assignees.map((a) => a.id)) : [];
 
   async function confirm() {
     setBusy(true);
     try {
-      // admin overrides become a pre-assignment / explicit deadline on the
-      // successor BEFORE completion — the engine then honors them (Rule A)
-      if (isAdmin && p?.kind === "handoff") {
-        const chosen = overrideAssignee ?? p.assigneeId;
-        if (chosen !== p.assigneeId || (chosen && p.route === "same_person")) {
-          await assign.mutateAsync({ id: p.nextTaskId, assigneeId: chosen });
+      // overrides become a pre-assignment / explicit schedule on the successor
+      // BEFORE completion — the engine then honors them (Rule A)
+      if (p?.kind === "handoff") {
+        if (canAssign && overrideAssignees) {
+          await setAssignees.mutateAsync({ id: p.nextTaskId, userIds: overrideAssignees });
         }
-        if (overrideDeadline) {
-          await setDeadline.mutateAsync({ id: p.nextTaskId, deadline: overrideDeadline });
+        if (canSchedule && (overrideStart || overrideDeadline)) {
+          await setSchedule.mutateAsync({
+            id: p.nextTaskId,
+            ...(overrideStart ? { startDate: overrideStart } : {}),
+            ...(overrideDeadline ? { deadline: overrideDeadline } : {}),
+          });
         }
       }
       await transition.mutateAsync({ id: task.id, to: "done" });
       if (gated) {
-        toast.success(`Sent for approval — Adham has been notified.`);
+        toast.success("Sent for approval — the approvers have been notified.");
       } else if (p?.kind === "handoff") {
-        const who = isAdmin
-          ? (users.data?.find((u) => u.id === (overrideAssignee ?? p.assigneeId))?.name ??
-            p.assigneeName)
-          : p.assigneeName;
+        const names = plannedAssignees
+          .map((id) => users.data?.find((u) => u.id === id)?.name)
+          .filter(Boolean)
+          .join(" & ");
         toast.success(
-          who
-            ? `"${task.title}" done — ${p.nextTitle} goes to ${who}.`
-            : `"${task.title}" done — ${p.nextTitle} needs an assignee (admin notified).`,
+          names
+            ? `"${label}" done — ${p.nextLabel} goes to ${names}.`
+            : `"${label}" done — ${p.nextLabel} still needs someone.`,
         );
       } else if (p?.kind === "last_stage") {
-        toast.success(`"${task.title}" done — that was the last stage! 🎉`);
+        toast.success(`"${label}" done — that was the last stage! 🎉`);
       } else {
-        toast.success(`"${task.title}" completed ✓`);
+        toast.success(`"${label}" completed ✓`);
       }
       onDone();
       onClose();
@@ -157,7 +165,7 @@ function CompleteDialog({
 
   return (
     <Modal
-      title={gated ? "Submit for approval" : `Finish “${task.title}”?`}
+      title={gated ? "Submit for approval" : `Finish “${label}”?`}
       onClose={onClose}
       footer={
         <>
@@ -174,44 +182,47 @@ function CompleteDialog({
         <p className="text-sm text-gray-500">Checking what happens next…</p>
       ) : gated ? (
         <p className="text-sm text-gray-600">
-          This stage needs Adham's approval. He'll be notified, and the next stage starts once he
-          approves.
+          This stage needs approval. The approvers are notified, and the next stage starts once one
+          of them signs off.
         </p>
       ) : p?.kind === "handoff" ? (
         <div className="space-y-4">
-          <div className="flex items-center gap-3 rounded-xl bg-slate-50 px-4 py-3">
-            <span className="text-sm font-medium text-gray-500 line-through">{task.title}</span>
+          <div className="flex items-center gap-3 rounded-xl bg-canvas px-4 py-3">
+            <span className="text-sm font-medium text-gray-500 line-through">{label}</span>
             <ArrowRight size={16} className="shrink-0 text-accent-600" />
-            <div>
-              <p className="text-sm font-semibold text-gray-900">{p.nextTitle}</p>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-gray-900">{p.nextLabel}</p>
               <p className="text-xs text-gray-500">
-                {p.assigneeName
+                {p.assignees.length > 0
                   ? p.route === "pre_assigned"
-                    ? `already assigned to ${p.assigneeName}`
-                    : `goes to ${p.assigneeName} (same person, right skill)`
-                  : "no one qualifies — lands in the unassigned queue"}
+                    ? `already assigned to ${p.assignees.map((a) => a.name).join(" & ")}`
+                    : `stays with ${p.assignees.map((a) => a.name).join(" & ")} (same people, right skills)`
+                  : "no one qualifies — it lands in the unassigned queue"}
                 {p.defaultDeadline ? ` · due ${formatShort(p.defaultDeadline)}` : ""}
               </p>
             </div>
           </div>
-          {isAdmin && (
+
+          {canAssign && (
+            <div>
+              <Label>Hand off to</Label>
+              <PeoplePicker
+                selected={plannedAssignees}
+                onChange={setOverrideAssignees}
+                emptyHint="Nobody yet — it goes to the unassigned queue."
+              />
+            </div>
+          )}
+          {canSchedule && (
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label htmlFor="ho-assignee">Hand off to</Label>
-                <Select
-                  id="ho-assignee"
-                  value={overrideAssignee ?? p.assigneeId ?? ""}
-                  onChange={(e) => setOverrideAssignee(e.target.value || null)}
-                >
-                  <option value="">Unassigned</option>
-                  {users.data
-                    ?.filter((u) => u.active)
-                    .map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name}
-                      </option>
-                    ))}
-                </Select>
+                <Label htmlFor="ho-start">Start date</Label>
+                <Input
+                  id="ho-start"
+                  type="date"
+                  value={overrideStart ?? p.defaultStartDate ?? ""}
+                  onChange={(e) => setOverrideStart(e.target.value || null)}
+                />
               </div>
               <div>
                 <Label htmlFor="ho-deadline">Deadline</Label>
@@ -224,8 +235,10 @@ function CompleteDialog({
               </div>
             </div>
           )}
-          {!isAdmin && !p.assigneeName && (
-            <p className="text-xs text-gray-500">Adham will be notified to assign the next stage.</p>
+          {!canAssign && p.assignees.length === 0 && (
+            <p className="text-xs text-gray-500">
+              Whoever assigns work will be notified to staff the next stage.
+            </p>
           )}
         </div>
       ) : p?.kind === "last_stage" ? (

@@ -1,18 +1,20 @@
+import { can, taskLabel } from "@mams/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Flag, RotateCcw } from "lucide-react";
 import { useState } from "react";
 import { useParams } from "react-router";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState, ErrorBanner, SkeletonRows } from "@/components/ui/feedback";
-import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { Input, Label, Textarea } from "@/components/ui/input";
 import { AvatarStack, PageHeader } from "@/components/ui/page";
+import { PeoplePicker } from "@/components/people-picker";
 import { TaskActionButton } from "@/components/task-action";
 import { DeadlineChip, StatusBadge } from "@/components/task-bits";
+import { formatShort } from "@/lib/dates";
+import { useMe, type Viewer } from "@/lib/session";
 import { useTRPC } from "@/lib/trpc";
-import { useMe } from "./app-layout";
 import { ActivityList } from "./project-detail";
 
 export function TaskDetailPage() {
@@ -38,15 +40,20 @@ export function TaskDetailPage() {
     return <ErrorBanner message="Couldn't load this task." onRetry={() => task.refetch()} />;
 
   const t = task.data;
-  const isAdmin = me.data?.role === "admin";
+  const viewer = me.data as Viewer;
+  const label = taskLabel(t.stageName);
+  const canManage = can(viewer, "tasks.manage");
+  const canAssign = can(viewer, "tasks.assign");
+  const canApprove = can(viewer, "tasks.approve");
+  const onTask = t.assigneeIds.includes(viewer.id);
 
   return (
     <div className="space-y-6">
       <PageHeader
         backTo={`/projects/${t.projectId}`}
         backLabel={t.projectTitle}
-        title={t.title}
-        subtitle={`${t.projectTitle} · ${t.clientName}${t.stageName ? ` · ${t.stageName}` : ""}`}
+        title={label}
+        subtitle={`${t.projectTitle} · ${t.clientName}`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={t.status as never} />
@@ -54,16 +61,16 @@ export function TaskDetailPage() {
             <TaskActionButton
               task={{
                 id: t.id,
-                title: t.title,
                 status: t.status as never,
-                assigneeId: t.assigneeId,
+                stageName: t.stageName,
+                assigneeIds: t.assigneeIds,
                 requiresApproval: t.requiresApproval,
                 chainPosition: t.chainPosition,
               }}
-              viewer={me.data!}
+              viewer={viewer}
               size="md"
             />
-            {isAdmin && t.status === "awaiting_approval" && (
+            {canApprove && t.status === "awaiting_approval" && (
               <Button
                 variant="secondary"
                 disabled={transition.isPending}
@@ -72,7 +79,7 @@ export function TaskDetailPage() {
                 Request changes
               </Button>
             )}
-            {isAdmin && t.status === "done" && (
+            {canApprove && t.status === "done" && (
               <Button
                 variant="secondary"
                 disabled={transition.isPending}
@@ -91,7 +98,7 @@ export function TaskDetailPage() {
       />
 
       {t.flagged && (
-        <div className="flex items-start gap-2 rounded-lg border border-orange-200 bg-orange-50 px-4 py-3">
+        <div className="flex items-start gap-2 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3">
           <Flag size={16} className="mt-0.5 shrink-0 text-orange-600" />
           <div>
             <p className="text-sm font-medium text-orange-800">Needs attention</p>
@@ -112,14 +119,16 @@ export function TaskDetailPage() {
               </CardBody>
             </Card>
           )}
-          <ChecklistCard task={t} canEdit={isAdmin || t.assigneeId === me.data!.id} />
+          <ChecklistCard task={t} canEdit={canManage || onTask} />
           <CommentsCard taskId={t.id} />
         </div>
 
         <div className="space-y-6">
-          {isAdmin && (
-            <AdminControls
-              task={{ ...t, helperIds: t.helpers.map((h) => h.id) }}
+          {(canManage || canAssign) && (
+            <ManageCard
+              task={t}
+              canManage={canManage}
+              canAssign={canAssign}
               onChanged={invalidate}
             />
           )}
@@ -127,17 +136,23 @@ export function TaskDetailPage() {
             <CardHeader>
               <CardTitle>Info</CardTitle>
             </CardHeader>
-            <CardBody className="space-y-2 text-sm">
-              <InfoRow label="Owner" value={t.assigneeName ?? "Unassigned"} />
-              {t.helpers.length > 0 && (
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-gray-500">Helpers</span>
-                  <AvatarStack names={t.helpers.map((h) => h.name)} />
-                </div>
+            <CardBody className="space-y-2.5 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-gray-500">On this task</span>
+                {t.assignees.length > 0 ? (
+                  <AvatarStack names={t.assignees.map((a) => a.name)} />
+                ) : (
+                  <span className="font-medium text-gray-400">Nobody yet</span>
+                )}
+              </div>
+              {t.assignees.length > 0 && (
+                <p className="text-right text-xs text-gray-500">
+                  {t.assignees.map((a) => a.name).join(", ")}
+                </p>
               )}
-              <InfoRow label="Stage" value={t.stageName ?? "Ad-hoc"} />
-              <InfoRow label="Start" value={t.startDate ?? "—"} />
-              <InfoRow label="Deadline" value={t.deadline ?? "—"} />
+              <InfoRow label="Stage" value={t.stageName ?? "No stage"} />
+              <InfoRow label="Starts" value={t.startDate ? formatShort(t.startDate) : "—"} />
+              <InfoRow label="Deadline" value={t.deadline ? formatShort(t.deadline) : "—"} />
               {t.driveLink && (
                 <a
                   href={t.driveLink}
@@ -269,7 +284,7 @@ function CommentsCard({ taskId }: { taskId: string }) {
         ) : (
           <ul className="space-y-3">
             {comments.data.map((c) => (
-              <li key={c.id} className="rounded-lg bg-gray-50 px-3 py-2">
+              <li key={c.id} className="rounded-xl bg-canvas px-3 py-2">
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="text-sm font-medium text-gray-800">{c.authorName}</span>
                   <span className="text-xs text-gray-400">
@@ -310,33 +325,40 @@ function CommentsCard({ taskId }: { taskId: string }) {
   );
 }
 
-function AdminControls({
+function ManageCard({
   task,
+  canManage,
+  canAssign,
   onChanged,
 }: {
   task: {
     id: string;
-    assigneeId: string | null;
-    helperIds: string[];
+    assigneeIds: string[];
+    startDate: string | null;
     deadline: string | null;
     flagged: boolean;
     driveLink: string | null;
   };
+  canManage: boolean;
+  canAssign: boolean;
   onChanged: () => void;
 }) {
   const trpc = useTRPC();
-  const users = useQuery(trpc.users.list.queryOptions());
   const [flagNote, setFlagNote] = useState("");
   const [drive, setDrive] = useState(task.driveLink ?? "");
 
-  const assign = useMutation(trpc.tasks.assign.mutationOptions({ onSettled: onChanged }));
-  const setHelpers = useMutation(trpc.tasks.setHelpers.mutationOptions({ onSettled: onChanged }));
-  const setDeadline = useMutation(trpc.tasks.setDeadline.mutationOptions({ onSettled: onChanged }));
-  const flag = useMutation(trpc.tasks.flag.mutationOptions({ onSettled: onChanged }));
-  const unflag = useMutation(trpc.tasks.unflag.mutationOptions({ onSettled: onChanged }));
-  const setDriveLink = useMutation(trpc.tasks.setDriveLink.mutationOptions({ onSettled: onChanged }));
-
-  const activeUsers = users.data?.filter((u) => u.active) ?? [];
+  const onError = (err: { message: string }) => toast.error(err.message);
+  const setAssignees = useMutation(
+    trpc.tasks.setAssignees.mutationOptions({ onSettled: onChanged, onError }),
+  );
+  const setSchedule = useMutation(
+    trpc.tasks.setSchedule.mutationOptions({ onSettled: onChanged, onError }),
+  );
+  const flag = useMutation(trpc.tasks.flag.mutationOptions({ onSettled: onChanged, onError }));
+  const unflag = useMutation(trpc.tasks.unflag.mutationOptions({ onSettled: onChanged, onError }));
+  const setDriveLink = useMutation(
+    trpc.tasks.setDriveLink.mutationOptions({ onSettled: onChanged, onError }),
+  );
 
   return (
     <Card>
@@ -344,112 +366,96 @@ function AdminControls({
         <CardTitle>Manage</CardTitle>
       </CardHeader>
       <CardBody className="space-y-4">
-        <div>
-          <Label htmlFor="t-assignee">Owner (accountable)</Label>
-          <Select
-            id="t-assignee"
-            value={task.assigneeId ?? ""}
-            disabled={assign.isPending}
-            onChange={(e) => assign.mutate({ id: task.id, assigneeId: e.target.value || null })}
-          >
-            <option value="">Unassigned</option>
-            {activeUsers.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div>
-          <Label>Helpers (also work on this)</Label>
-          <div className="flex flex-wrap gap-1.5 pt-1">
-            {activeUsers
-              .filter((u) => u.id !== task.assigneeId)
-              .map((u) => {
-                const on = task.helperIds.includes(u.id);
-                return (
-                  <button
-                    key={u.id}
-                    type="button"
-                    disabled={setHelpers.isPending}
-                    onClick={() =>
-                      setHelpers.mutate({
-                        id: task.id,
-                        userIds: on
-                          ? task.helperIds.filter((x) => x !== u.id)
-                          : [...task.helperIds, u.id],
-                      })
-                    }
-                    className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                      on
-                        ? "border-accent-600 bg-accent-50 text-accent-700"
-                        : "border-gray-300 bg-white text-gray-500 hover:bg-gray-50"
-                    }`}
-                  >
-                    {u.name}
-                  </button>
-                );
-              })}
-          </div>
-        </div>
-        <div>
-          <Label htmlFor="t-deadline">Deadline</Label>
-          <Input
-            id="t-deadline"
-            type="date"
-            defaultValue={task.deadline ?? ""}
-            disabled={setDeadline.isPending}
-            onChange={(e) => setDeadline.mutate({ id: task.id, deadline: e.target.value || null })}
-          />
-        </div>
-        <div>
-          <Label htmlFor="t-drive">Drive link</Label>
-          <div className="flex gap-2">
-            <Input
-              id="t-drive"
-              type="url"
-              placeholder="https://drive.google.com/…"
-              value={drive}
-              onChange={(e) => setDrive(e.target.value)}
+        {canAssign && (
+          <div>
+            <Label>People on this task</Label>
+            <PeoplePicker
+              selected={task.assigneeIds}
+              disabled={setAssignees.isPending}
+              onChange={(userIds) => setAssignees.mutate({ id: task.id, userIds })}
             />
-            <Button
-              variant="secondary"
-              size="md"
-              disabled={setDriveLink.isPending}
-              onClick={() => setDriveLink.mutate({ id: task.id, driveLink: drive || null })}
-            >
-              Save
-            </Button>
           </div>
-        </div>
-        <div className="border-t border-gray-100 pt-3">
-          {task.flagged ? (
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={unflag.isPending}
-              onClick={() => unflag.mutate({ id: task.id })}
-            >
-              Remove flag
-            </Button>
-          ) : (
-            <div className="space-y-2">
-              <Input
-                placeholder="Flag note (optional)"
-                value={flagNote}
-                onChange={(e) => setFlagNote(e.target.value)}
-              />
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={flag.isPending}
-                onClick={() => flag.mutate({ id: task.id, note: flagNote || undefined })}
-              >
-                <Flag size={14} /> Flag for attention
-              </Button>
+        )}
+        {canManage && (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="t-start">Start date</Label>
+                <Input
+                  id="t-start"
+                  type="date"
+                  defaultValue={task.startDate ?? ""}
+                  max={task.deadline ?? undefined}
+                  disabled={setSchedule.isPending}
+                  onChange={(e) =>
+                    setSchedule.mutate({ id: task.id, startDate: e.target.value || null })
+                  }
+                />
+              </div>
+              <div>
+                <Label htmlFor="t-deadline">Deadline</Label>
+                <Input
+                  id="t-deadline"
+                  type="date"
+                  defaultValue={task.deadline ?? ""}
+                  min={task.startDate ?? undefined}
+                  disabled={setSchedule.isPending}
+                  onChange={(e) =>
+                    setSchedule.mutate({ id: task.id, deadline: e.target.value || null })
+                  }
+                />
+              </div>
             </div>
-          )}
-        </div>
+            <div>
+              <Label htmlFor="t-drive">Drive link</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="t-drive"
+                  type="url"
+                  placeholder="https://drive.google.com/…"
+                  value={drive}
+                  onChange={(e) => setDrive(e.target.value)}
+                />
+                <Button
+                  variant="secondary"
+                  size="md"
+                  disabled={setDriveLink.isPending}
+                  onClick={() => setDriveLink.mutate({ id: task.id, driveLink: drive || null })}
+                >
+                  Save
+                </Button>
+              </div>
+            </div>
+            <div className="border-t border-hairline pt-3">
+              {task.flagged ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={unflag.isPending}
+                  onClick={() => unflag.mutate({ id: task.id })}
+                >
+                  Remove flag
+                </Button>
+              ) : (
+                <div className="space-y-2">
+                  <Input
+                    placeholder="Flag note (optional)"
+                    value={flagNote}
+                    onChange={(e) => setFlagNote(e.target.value)}
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={flag.isPending}
+                    onClick={() => flag.mutate({ id: task.id, note: flagNote || undefined })}
+                  >
+                    <Flag size={14} /> Flag for attention
+                  </Button>
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </CardBody>
     </Card>
   );

@@ -1,7 +1,9 @@
 import { zDateISO, zHttpsUrl, zMoney, zPriority, zProjectStatus } from "@mams/shared";
 import { z } from "zod";
 import * as projectService from "../../services/project-service";
-import { adminProcedure, protectedProcedure, router } from "../trpc";
+import { permissionProcedure, protectedProcedure, router } from "../trpc";
+
+const manageProjects = permissionProcedure("projects.manage");
 
 export const projectsRouter = router({
   list: protectedProcedure
@@ -20,7 +22,7 @@ export const projectsRouter = router({
     projectService.getProject(input.id),
   ),
 
-  create: adminProcedure
+  create: manageProjects
     .input(
       z.object({
         clientId: z.uuid(),
@@ -33,12 +35,12 @@ export const projectsRouter = router({
         notes: z.string().max(5000).optional(),
         budget: zMoney.optional(),
         workflowTemplateId: z.uuid().optional(),
-        firstAssigneeId: z.string().optional(),
+        firstAssigneeIds: z.array(z.string()).max(10).default([]),
       }),
     )
     .mutation(({ ctx, input }) => projectService.createProject(ctx.user, input)),
 
-  update: adminProcedure
+  update: manageProjects
     .input(
       z.object({
         id: z.uuid(),
@@ -54,7 +56,7 @@ export const projectsRouter = router({
     )
     .mutation(({ ctx, input }) => projectService.updateProject(ctx.user, input)),
 
-  setStatus: adminProcedure
+  setStatus: manageProjects
     .input(z.object({ id: z.uuid(), status: zProjectStatus }))
     .mutation(({ ctx, input }) => projectService.setProjectStatus(ctx.user, input)),
 });

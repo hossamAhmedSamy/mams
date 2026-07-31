@@ -1,16 +1,27 @@
 import { randomUUID } from "node:crypto";
 import { schema } from "@mams/db";
+import { PERMISSIONS, type Permission } from "@mams/shared";
 import { asc, eq, inArray } from "drizzle-orm";
 import { db } from "../db";
 import * as projectService from "../services/project-service";
 import * as taskService from "../services/task-service";
 
-export type TestActor = { id: string; role: "admin" | "member"; name: string };
+export type TestActor = {
+  id: string;
+  role: "admin" | "member";
+  name: string;
+  permissions: Permission[];
+};
 
+/**
+ * Admins hold every permission (as in the real context builder); members hold
+ * only what a test grants, so authorization is exercised the way it ships.
+ */
 export async function makeUser(
   name: string,
   role: "admin" | "member",
   skillNames: string[] = [],
+  permissions: Permission[] = [],
 ): Promise<TestActor> {
   const id = randomUUID();
   await db.insert(schema.user).values({
@@ -29,7 +40,17 @@ export async function makeUser(
       .insert(schema.userSkills)
       .values(rows.map((s) => ({ userId: id, skillId: s.id })));
   }
-  return { id, role, name };
+  if (role !== "admin" && permissions.length > 0) {
+    await db
+      .insert(schema.userPermissions)
+      .values(permissions.map((permission) => ({ userId: id, permission })));
+  }
+  return {
+    id,
+    role,
+    name,
+    permissions: role === "admin" ? [...PERMISSIONS] : permissions,
+  };
 }
 
 export async function makeClient(name?: string) {
@@ -52,7 +73,7 @@ export async function templateIdByName(name: string) {
 /** Create a "Reels / Video" project; returns chain tasks ordered by position. */
 export async function makeReelsProject(
   admin: TestActor,
-  opts: { firstAssigneeId?: string } = {},
+  opts: { firstAssigneeIds?: string[] } = {},
 ) {
   const client = await makeClient();
   const project = await projectService.createProject(admin, {
@@ -60,9 +81,28 @@ export async function makeReelsProject(
     title: `Reels-${randomUUID().slice(0, 6)}`,
     priority: "medium",
     workflowTemplateId: await templateIdByName("Reels / Video"),
-    firstAssigneeId: opts.firstAssigneeId,
+    firstAssigneeIds: opts.firstAssigneeIds,
   });
   return { project, chain: await chainOf(project.id) };
+}
+
+/** Who is on this task, as a sorted id list (assignment is a set now). */
+export async function assigneesOf(taskId: string): Promise<string[]> {
+  const rows = await db
+    .select({ userId: schema.taskAssignees.userId })
+    .from(schema.taskAssignees)
+    .where(eq(schema.taskAssignees.taskId, taskId));
+  return rows.map((r) => r.userId).sort();
+}
+
+/** The task's display name — its stage, since tasks carry no title. */
+export async function labelOf(taskId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ name: schema.stages.name })
+    .from(schema.tasks)
+    .leftJoin(schema.stages, eq(schema.tasks.stageId, schema.stages.id))
+    .where(eq(schema.tasks.id, taskId));
+  return row?.name ?? null;
 }
 
 export async function chainOf(projectId: string) {

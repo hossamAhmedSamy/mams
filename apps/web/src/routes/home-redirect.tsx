@@ -1,6 +1,6 @@
 import { Navigate } from "react-router";
 
-/** Landing = My Work: your calendar + your assigned tasks (owner decision). */
+/** Everyone lands on Home (owner decision, 2026-07-31). */
 export function HomeRedirect() {
-  return <Navigate to="/my-work" replace />;
+  return <Navigate to="/home" replace />;
 }

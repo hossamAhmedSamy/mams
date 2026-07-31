@@ -1,3 +1,4 @@
+import { taskLabel } from "@mams/shared";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -12,16 +13,16 @@ const WD = ["M", "T", "W", "T", "F", "S", "S"];
 
 type CalTask = {
   id: string;
-  title: string;
   deadline: string | null;
   startDate: string | null;
   projectTitle: string;
-  assigneeName: string | null;
+  stageName: string | null;
+  assignees: { id: string; name: string }[];
 };
 
 /**
  * Compact month calendar for the landing screen: dots on busy days, tap a day
- * to see what's on. Members see their own work; admin sees the whole team.
+ * to see what's on. Scope follows `team.viewAll` — your work, or everyone's.
  */
 export function MiniCalendar() {
   const trpc = useTRPC();
@@ -137,10 +138,12 @@ export function MiniCalendar() {
                       )}
                     />
                     <span className="truncate font-medium text-gray-800 group-hover:text-accent-700">
-                      {task.title}
+                      {taskLabel(task.stageName)}
                     </span>
                     <span className="truncate text-xs text-gray-400">
-                      {task.assigneeName ? `${task.assigneeName} · ` : ""}
+                      {task.assignees.length > 0
+                        ? `${task.assignees.map((a) => a.name).join(", ")} · `
+                        : ""}
                       {task.projectTitle}
                     </span>
                   </Link>

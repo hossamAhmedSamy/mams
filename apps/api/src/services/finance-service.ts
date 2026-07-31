@@ -1,16 +1,21 @@
 import { schema } from "@mams/db";
-import { formatMoney } from "@mams/shared";
+import { formatMoney, type Permission } from "@mams/shared";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { db } from "../db";
 import { env } from "../env";
 import { todayISO } from "../lib/time";
 import { logActivity } from "./activity";
-import { notifyAdmins, notifyUser } from "./notify";
+import { notifyResponsible, notifyUser } from "./notify";
 
 const { expenses, incomes, expenseCategories, recurringExpenses, projects, clients, user } = schema;
 
-type Actor = { id: string; role: "admin" | "member"; name: string };
+type Actor = {
+  id: string;
+  role: "admin" | "member";
+  name: string;
+  permissions: readonly Permission[];
+};
 
 // ---------------------------------------------------------------------------
 // Member: request an expense, see own requests
@@ -50,8 +55,9 @@ export async function requestExpense(
       action: "requested",
       detail: { amount: input.amount },
     });
-    await notifyAdmins(
+    await notifyResponsible(
       tx,
+      "money.manage",
       {
         type: "expense_requested",
         title: `${actor.name} requests ${formatMoney(input.amount)}`,

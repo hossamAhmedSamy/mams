@@ -2,10 +2,11 @@ import type { InputHTMLAttributes, SelectHTMLAttributes, TextareaHTMLAttributes 
 import { cn } from "@/lib/utils";
 
 const base =
-  "w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 placeholder:text-gray-400 focus:border-accent-500 focus:outline-2 focus:outline-accent-100 disabled:opacity-50";
+  "w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 shadow-xs transition-colors placeholder:text-gray-400 focus:border-accent-500 focus:outline-2 focus:outline-accent-100 disabled:opacity-50";
 
+/* Phones: h-10 keeps inputs thumb-sized and stops iOS zooming on focus. */
 export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
-  return <input className={cn(base, "h-9", className)} {...props} />;
+  return <input className={cn(base, "h-10 sm:h-9", className)} {...props} />;
 }
 
 export function Textarea({ className, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
@@ -13,7 +14,7 @@ export function Textarea({ className, ...props }: TextareaHTMLAttributes<HTMLTex
 }
 
 export function Select({ className, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select className={cn(base, "h-9", className)} {...props} />;
+  return <select className={cn(base, "h-10 sm:h-9", className)} {...props} />;
 }
 
 export function Label({

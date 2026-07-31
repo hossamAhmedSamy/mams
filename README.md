@@ -57,7 +57,11 @@ Vercel — see PLAN.md §1.3 for the checklist. No code changes.
 
 ## Operations
 
-- **Add a user / skills / deactivate**: Settings → Team (admin).
+- **Add a user / skills / permissions / deactivate**: Settings → Team.
+- **Who can do what**: authorization is per user, not per role. Admins hold every
+  permission implicitly; each member is granted exactly the capabilities they
+  need (Settings → Team → Permissions). The closed set lives in
+  `packages/shared/src/index.ts` (`PERMISSIONS`).
 - **Rotate a secret**: change the env var on Render → redeploy. Rotating
   `BETTER_AUTH_SECRET` signs everyone out; rotating `JOB_TRIGGER_TOKEN` requires
   updating the cron-job.org header.
@@ -69,9 +73,9 @@ Vercel — see PLAN.md §1.3 for the checklist. No code changes.
 | Milestone | Status |
 |---|---|
 | M0 scaffold & pipelines | ✅ built + verified locally (deploy pending accounts) |
-| M1 schema, auth, users | ✅ done — login, forced pw change, RBAC, rate limiting |
-| M2 core CRUD & screens | ✅ done — Board, Project detail, Task detail, My Work |
-| M3 handoff engine | ✅ done — 19 integration tests green |
+| M1 schema, auth, users | ✅ done — login, forced pw change, per-user permissions, rate limiting |
+| M2 core CRUD & screens | ✅ done — Home, Board, Project detail, Task detail, My Work |
+| M3 handoff engine | ✅ done — 38 integration tests green |
 | M4 reminders & notifications | ◐ engine + auto-rule done; email/digest/bell UI pending |
 | M5 dashboards | ☐ |
 | M6 ledger & finance | ☐ |

@@ -1,32 +1,36 @@
+import { can, taskLabel } from "@mams/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ExternalLink, Flag, Lock } from "lucide-react";
+import { Check, ExternalLink, Flag, Lock, Plus, UserPlus } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
 import { EmptyState, ErrorBanner, SkeletonRows } from "@/components/ui/feedback";
-import { Select } from "@/components/ui/input";
-import { Avatar, PageHeader } from "@/components/ui/page";
+import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { AvatarStack, PageHeader } from "@/components/ui/page";
+import { PeoplePicker } from "@/components/people-picker";
 import { TaskActionButton } from "@/components/task-action";
-import { DeadlineChip, PriorityDot, StatusBadge } from "@/components/task-bits";
-import { formatShort } from "@/lib/dates";
+import { DeadlineChip, PriorityDot, ScheduleLine, StatusBadge, type Viewer } from "@/components/task-bits";
+import { todayISO } from "@/lib/dates";
+import { useMe } from "@/lib/session";
 import { useTRPC } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
-import { useMe } from "./app-layout";
 import { LedgerTab } from "./project-ledger";
 
 type ProjectTask = {
   id: string;
-  title: string;
   status: string;
   chainPosition: number | null;
   deadline: string | null;
   startDate: string | null;
   flagged: boolean;
   requiresApproval: boolean;
-  assigneeId: string | null;
-  assigneeName: string | null;
+  stageId: string | null;
   stageName: string | null;
+  assignees: { id: string; name: string }[];
+  assigneeIds: string[];
   checklist: { text: string; done: boolean }[] | null;
   driveLink: string | null;
 };
@@ -38,6 +42,7 @@ export function ProjectDetailPage() {
   const queryClient = useQueryClient();
   const project = useQuery(trpc.projects.get.queryOptions({ id: id! }));
   const [tab, setTab] = useState<"work" | "activity" | "money">("work");
+  const [adding, setAdding] = useState(false);
 
   const setStatus = useMutation(
     trpc.projects.setStatus.mutationOptions({
@@ -55,7 +60,10 @@ export function ProjectDetailPage() {
     return <ErrorBanner message="Couldn't load this project." onRetry={() => project.refetch()} />;
 
   const p = project.data;
-  const isAdmin = me.data?.role === "admin";
+  const viewer = me.data as Viewer;
+  const canManageProject = can(viewer, "projects.manage");
+  const canManageTasks = can(viewer, "tasks.manage");
+  const canSeeMoney = can(viewer, "money.view");
   const chain = (p.tasks as ProjectTask[]).filter((t) => t.chainPosition !== null);
   const adhoc = (p.tasks as ProjectTask[]).filter((t) => t.chainPosition === null);
   const doneCount = chain.filter((t) => t.status === "done").length;
@@ -63,7 +71,7 @@ export function ProjectDetailPage() {
   const tabs: { key: "work" | "activity" | "money"; label: string }[] = [
     { key: "work", label: "Work" },
     { key: "activity", label: "Activity" },
-    ...(isAdmin ? [{ key: "money" as const, label: "Money" }] : []),
+    ...(canSeeMoney ? [{ key: "money" as const, label: "Money" }] : []),
   ];
 
   return (
@@ -87,7 +95,7 @@ export function ProjectDetailPage() {
                   Drive <ExternalLink size={13} />
                 </a>
               )}
-              {isAdmin ? (
+              {canManageProject ? (
                 <Select
                   className="w-36"
                   value={p.status}
@@ -107,7 +115,7 @@ export function ProjectDetailPage() {
         {p.notes && <p className="-mt-3 max-w-2xl text-sm text-gray-600">{p.notes}</p>}
       </div>
 
-      <div className="flex gap-1 border-b border-gray-200">
+      <div className="flex gap-1 border-b border-hairline">
         {tabs.map((t) => (
           <button
             key={t.key}
@@ -134,7 +142,7 @@ export function ProjectDetailPage() {
                   {doneCount}/{chain.length} stages done
                 </span>
               </div>
-              <Pipeline chain={chain} isAdmin={isAdmin ?? false} viewer={me.data!} />
+              <Pipeline chain={chain} viewer={viewer} />
             </section>
           ) : (
             <Card>
@@ -145,21 +153,42 @@ export function ProjectDetailPage() {
             </Card>
           )}
 
-          {adhoc.length > 0 && (
-            <section>
-              <h2 className="mb-3 text-sm font-semibold text-gray-700">Extra tasks</h2>
+          <section>
+            <div className="mb-3 flex items-baseline justify-between">
+              <h2 className="text-sm font-semibold text-gray-700">Extra tasks</h2>
+              {canManageTasks && (
+                <Button variant="secondary" size="sm" onClick={() => setAdding((v) => !v)}>
+                  <Plus size={14} /> Add task
+                </Button>
+              )}
+            </div>
+            {adding && (
+              <div className="mb-3">
+                <AddTaskCard projectId={p.id} onDone={() => setAdding(false)} />
+              </div>
+            )}
+            {adhoc.length > 0 ? (
               <div className="space-y-2">
                 {adhoc.map((task) => (
-                  <AdhocTaskRow key={task.id} task={task} viewer={me.data!} />
+                  <AdhocTaskRow key={task.id} task={task} viewer={viewer} />
                 ))}
               </div>
-            </section>
-          )}
+            ) : (
+              !adding && (
+                <Card>
+                  <EmptyState
+                    title="No extra tasks"
+                    hint="Anything outside the flow — a re-shoot, a fix — goes here."
+                  />
+                </Card>
+              )
+            )}
+          </section>
         </div>
       )}
 
       {tab === "activity" && <ActivityList entityType="project" entityId={p.id} />}
-      {tab === "money" && isAdmin && <LedgerTab projectId={p.id} />}
+      {tab === "money" && canSeeMoney && <LedgerTab projectId={p.id} />}
     </div>
   );
 }
@@ -169,15 +198,7 @@ export function ProjectDetailPage() {
 // the big card; done stages collapse; future stages explain when they start.
 // ---------------------------------------------------------------------------
 
-function Pipeline({
-  chain,
-  isAdmin,
-  viewer,
-}: {
-  chain: ProjectTask[];
-  isAdmin: boolean;
-  viewer: { id: string; role: "admin" | "member" };
-}) {
+function Pipeline({ chain, viewer }: { chain: ProjectTask[]; viewer: Viewer }) {
   const currentIdx = chain.findIndex((t) => t.status !== "done");
   return (
     <ol>
@@ -185,6 +206,7 @@ function Pipeline({
         const isDone = task.status === "done";
         const isCurrent = i === currentIdx;
         const isLast = i === chain.length - 1;
+        const previous = chain[i - 1] ? taskLabel(chain[i - 1]!.stageName) : "the previous stage";
         return (
           <li key={task.id} className="relative flex gap-3 sm:gap-4">
             {/* rail */}
@@ -211,28 +233,31 @@ function Pipeline({
             {/* card */}
             <div className={cn("min-w-0 flex-1", isLast ? "pb-0" : "pb-3")}>
               {isCurrent ? (
-                <CurrentStageCard task={task} isAdmin={isAdmin} viewer={viewer} />
+                <CurrentStageCard task={task} viewer={viewer} />
               ) : (
                 <Link
                   to={`/tasks/${task.id}`}
                   className={cn(
                     "flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-white px-4 py-3 transition-colors hover:border-gray-300",
-                    isDone ? "border-gray-100" : "border-gray-100 opacity-70",
+                    isDone ? "border-hairline" : "border-hairline opacity-70",
                   )}
                 >
                   <div className="flex items-center gap-2">
                     <span className={cn("font-medium", isDone ? "text-gray-500" : "text-gray-600")}>
-                      {task.title}
+                      {taskLabel(task.stageName)}
                     </span>
                     {task.requiresApproval && <Lock size={12} className="text-amber-500" />}
                     {task.flagged && <Flag size={12} className="text-status-flagged" />}
                   </div>
-                  <span className="text-xs text-gray-400">
+                  <span className="flex items-center gap-2 text-xs text-gray-400">
+                    {task.assignees.length > 0 && (
+                      <AvatarStack names={task.assignees.map((a) => a.name)} />
+                    )}
                     {isDone
-                      ? `Done${task.assigneeName ? ` by ${task.assigneeName}` : ""}`
-                      : task.assigneeName
-                        ? `${task.assigneeName} · starts after ${chain[i - 1]?.title ?? "previous stage"}`
-                        : `starts after ${chain[i - 1]?.title ?? "previous stage"}`}
+                      ? "Done"
+                      : task.assignees.length > 0
+                        ? `starts after ${previous}`
+                        : `unassigned · starts after ${previous}`}
                   </span>
                 </Link>
               )}
@@ -244,20 +269,14 @@ function Pipeline({
   );
 }
 
-function CurrentStageCard({
-  task,
-  isAdmin,
-  viewer,
-}: {
-  task: ProjectTask;
-  isAdmin: boolean;
-  viewer: { id: string; role: "admin" | "member" };
-}) {
+function CurrentStageCard({ task, viewer }: { task: ProjectTask; viewer: Viewer }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const users = useQuery({ ...trpc.users.list.queryOptions(), enabled: isAdmin });
-  const assign = useMutation(
-    trpc.tasks.assign.mutationOptions({
+  const canAssign = can(viewer, "tasks.assign");
+  const [editingPeople, setEditingPeople] = useState(false);
+  const setAssignees = useMutation(
+    trpc.tasks.setAssignees.mutationOptions({
+      onError: (err) => toast.error(err.message),
       onSettled: () => queryClient.invalidateQueries({ queryKey: trpc.projects.pathKey() }),
     }),
   );
@@ -272,10 +291,14 @@ function CurrentStageCard({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Link to={`/tasks/${task.id}`} className="flex items-center gap-2">
-          <span className="text-base font-semibold text-gray-900">{task.title}</span>
+          <span className="text-base font-semibold text-gray-900">{taskLabel(task.stageName)}</span>
           <StatusBadge status={task.status as never} />
         </Link>
         <DeadlineChip deadline={task.deadline} />
+      </div>
+
+      <div className="mt-1">
+        <ScheduleLine startDate={task.startDate} deadline={task.deadline} />
       </div>
 
       {task.flagged && (
@@ -285,29 +308,23 @@ function CurrentStageCard({
       )}
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          {isAdmin ? (
-            <Select
-              className="h-8 w-40 text-xs"
-              value={task.assigneeId ?? ""}
-              disabled={assign.isPending}
-              onChange={(e) => assign.mutate({ id: task.id, assigneeId: e.target.value || null })}
-            >
-              <option value="">Unassigned</option>
-              {users.data
-                ?.filter((u) => u.active)
-                .map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
-                ))}
-            </Select>
-          ) : task.assigneeName ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {task.assignees.length > 0 ? (
             <span className="flex items-center gap-2 text-sm text-gray-700">
-              <Avatar name={task.assigneeName} size="sm" /> {task.assigneeName}
+              <AvatarStack names={task.assignees.map((a) => a.name)} />
+              <span className="truncate">{task.assignees.map((a) => a.name).join(", ")}</span>
             </span>
           ) : (
-            <span className="text-sm text-gray-400">Waiting for assignment</span>
+            <span className="text-sm text-gray-400">Nobody assigned yet</span>
+          )}
+          {canAssign && (
+            <button
+              type="button"
+              onClick={() => setEditingPeople((v) => !v)}
+              className="inline-flex items-center gap-1 text-xs font-medium text-accent-600 hover:text-accent-700"
+            >
+              <UserPlus size={13} /> {editingPeople ? "Done" : "Change"}
+            </button>
           )}
           {task.checklist && task.checklist.length > 0 && (
             <span className="text-xs text-gray-400">
@@ -323,9 +340,9 @@ function CurrentStageCard({
         <TaskActionButton
           task={{
             id: task.id,
-            title: task.title,
             status: task.status as never,
-            assigneeId: task.assigneeId,
+            stageName: task.stageName,
+            assigneeIds: task.assigneeIds,
             requiresApproval: task.requiresApproval,
             chainPosition: task.chainPosition,
           }}
@@ -333,36 +350,45 @@ function CurrentStageCard({
           size="md"
         />
       </div>
+
+      {editingPeople && canAssign && (
+        <div className="mt-3 border-t border-hairline pt-3">
+          <PeoplePicker
+            selected={task.assigneeIds}
+            disabled={setAssignees.isPending}
+            onChange={(userIds) => setAssignees.mutate({ id: task.id, userIds })}
+          />
+        </div>
+      )}
     </div>
   );
 }
 
-function AdhocTaskRow({
-  task,
-  viewer,
-}: {
-  task: ProjectTask;
-  viewer: { id: string; role: "admin" | "member" };
-}) {
+function AdhocTaskRow({ task, viewer }: { task: ProjectTask; viewer: Viewer }) {
   return (
-    <Card className={task.flagged ? "border-orange-300" : ""}>
-      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+    <Card className={cn("px-4 py-3", task.flagged && "border-orange-300")}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <Link to={`/tasks/${task.id}`} className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium text-gray-900">{task.title}</span>
+            <span className="font-medium text-gray-900">{taskLabel(task.stageName)}</span>
             <StatusBadge status={task.status as never} />
             {task.flagged && <Badge tone="orange">Flagged</Badge>}
           </div>
-          <p className="mt-0.5 text-sm text-gray-500">{task.assigneeName ?? "Unassigned"}</p>
+          <p className="mt-0.5 text-sm text-gray-500">
+            {task.assignees.length > 0
+              ? task.assignees.map((a) => a.name).join(", ")
+              : "Nobody assigned"}
+          </p>
+          <ScheduleLine startDate={task.startDate} deadline={task.deadline} />
         </Link>
         <div className="flex shrink-0 items-center gap-3">
           <DeadlineChip deadline={task.deadline} />
           <TaskActionButton
             task={{
               id: task.id,
-              title: task.title,
               status: task.status as never,
-              assigneeId: task.assigneeId,
+              stageName: task.stageName,
+              assigneeIds: task.assigneeIds,
               requiresApproval: task.requiresApproval,
               chainPosition: task.chainPosition,
             }}
@@ -370,6 +396,111 @@ function AdhocTaskRow({
           />
         </div>
       </div>
+    </Card>
+  );
+}
+
+/**
+ * Add a task outside the flow. It is named by the stage it belongs to — there
+ * is no title to invent — and carries both ends of its own schedule.
+ */
+function AddTaskCard({ projectId, onDone }: { projectId: string; onDone: () => void }) {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const stages = useQuery(trpc.workflows.listStages.queryOptions());
+  const [stageId, setStageId] = useState("");
+  const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
+  const [startDate, setStartDate] = useState(todayISO());
+  const [deadline, setDeadline] = useState("");
+  const [details, setDetails] = useState("");
+
+  const create = useMutation(
+    trpc.tasks.create.mutationOptions({
+      onSuccess: () => {
+        toast.success("Task added");
+        queryClient.invalidateQueries({ queryKey: trpc.projects.pathKey() });
+        queryClient.invalidateQueries({ queryKey: trpc.tasks.pathKey() });
+        onDone();
+      },
+      onError: (err) => toast.error(err.message),
+    }),
+  );
+
+  return (
+    <Card>
+      <CardBody>
+        <form
+          className="grid gap-4 sm:grid-cols-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            create.mutate({
+              projectId,
+              stageId: stageId || undefined,
+              assigneeIds,
+              startDate: startDate || undefined,
+              deadline: deadline || undefined,
+              details: details || undefined,
+            });
+          }}
+        >
+          <div>
+            <Label htmlFor="at-stage">Kind of work</Label>
+            <Select id="at-stage" value={stageId} onChange={(e) => setStageId(e.target.value)}>
+              <option value="">Choose…</option>
+              {stages.data
+                ?.filter((s) => s.active)
+                .map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+            </Select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="at-start">Start date</Label>
+              <Input
+                id="at-start"
+                type="date"
+                value={startDate}
+                max={deadline || undefined}
+                onChange={(e) => setStartDate(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label htmlFor="at-due">Deadline</Label>
+              <Input
+                id="at-due"
+                type="date"
+                value={deadline}
+                min={startDate || undefined}
+                onChange={(e) => setDeadline(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="sm:col-span-2">
+            <Label>Who's on it</Label>
+            <PeoplePicker selected={assigneeIds} onChange={setAssigneeIds} />
+          </div>
+          <div className="sm:col-span-2">
+            <Label htmlFor="at-details">Notes (optional)</Label>
+            <Textarea
+              id="at-details"
+              placeholder="Anything the team needs to know"
+              value={details}
+              onChange={(e) => setDetails(e.target.value)}
+            />
+          </div>
+          <div className="flex gap-2 sm:col-span-2">
+            <Button type="submit" disabled={create.isPending || !stageId}>
+              {create.isPending ? "Adding…" : "Add task"}
+            </Button>
+            <Button type="button" variant="ghost" onClick={onDone}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      </CardBody>
     </Card>
   );
 }
@@ -436,14 +567,16 @@ function describeAction(action: string, detail: Record<string, unknown> | null):
       return `posted a recurring expense (${detail?.name ?? ""})`;
     case "status_changed":
       return `moved ${detail?.from ?? "?"} → ${detail?.to ?? "?"}`;
-    case "assigned":
-      return "changed the owner";
-    case "helpers_changed":
-      return "updated the helpers";
-    case "deadline_changed":
-      return `set the deadline to ${detail?.to ?? "none"}`;
+    case "assignees_changed":
+      return `changed who's on it (${((detail?.to as string[]) ?? []).length} assigned)`;
+    case "schedule_changed": {
+      const to = detail?.to as { startDate?: string | null; deadline?: string | null } | undefined;
+      return `moved the dates to ${to?.startDate ?? "no start"} → ${to?.deadline ?? "no deadline"}`;
+    }
+    case "permissions_changed":
+      return "updated the permissions";
     case "handoff":
-      return `handed off (${detail?.route === "same_person" ? "same person kept it" : detail?.route === "pre_assigned" ? "pre-assigned" : "needs assignment"})`;
+      return `handed off (${detail?.route === "same_person" ? "the same people kept it" : detail?.route === "pre_assigned" ? "pre-assigned" : "needs assignment"})`;
     case "flagged":
       return "flagged this";
     case "unflagged":

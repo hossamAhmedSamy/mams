@@ -1,7 +1,7 @@
-import type { Priority, TaskStatus } from "@mams/shared";
-import { TASK_STATUS_LABELS } from "@mams/shared";
+import type { Permission, Priority, TaskStatus } from "@mams/shared";
+import { can, TASK_STATUS_LABELS } from "@mams/shared";
 import { Badge } from "@/components/ui/badge";
-import { deadlineLabel } from "@/lib/dates";
+import { deadlineLabel, spanLabel } from "@/lib/dates";
 
 const statusTone: Record<TaskStatus, "gray" | "accent" | "blue" | "amber" | "green"> = {
   waiting: "gray",
@@ -29,6 +29,21 @@ export function DeadlineChip({
   return <Badge tone={muted ? "gray" : tone}>{text}</Badge>;
 }
 
+/** "Starts 3 Aug · due 7 Aug" — both ends of the task's window, in one line. */
+export function ScheduleLine({
+  startDate,
+  deadline,
+  today,
+}: {
+  startDate: string | null;
+  deadline: string | null;
+  today?: string;
+}) {
+  const text = spanLabel(startDate, deadline, today);
+  if (!text) return null;
+  return <span className="text-xs text-gray-400">{text}</span>;
+}
+
 export function PriorityDot({ priority }: { priority: Priority }) {
   const color =
     priority === "high" ? "bg-status-overdue" : priority === "medium" ? "bg-status-due-soon" : "bg-gray-300";
@@ -40,29 +55,33 @@ export function PriorityDot({ priority }: { priority: Priority }) {
   );
 }
 
+export type Viewer = { id: string; role: "admin" | "member"; permissions: Permission[] };
+
 /**
- * The one primary action for this viewer (PLAN.md §8.1): the single legal
- * next transition, or null → no button.
+ * The one primary action for this viewer (PLAN.md §8.1): the single legal next
+ * transition, or null → no button. Assignees are equals, so anyone on the task
+ * can move it; the rest is per-user permission.
  */
 export function nextAction(
-  task: { status: TaskStatus; assigneeId: string | null; requiresApproval: boolean },
-  viewer: { id: string; role: "admin" | "member" },
+  task: { status: TaskStatus; assigneeIds: string[]; requiresApproval: boolean },
+  viewer: Viewer,
 ): { to: TaskStatus; label: string } | null {
-  const isAdmin = viewer.role === "admin";
-  const isMine = task.assigneeId === viewer.id;
+  const onTask = task.assigneeIds.includes(viewer.id);
+  const canManage = can(viewer, "tasks.manage");
+  const canApprove = can(viewer, "tasks.approve");
   switch (task.status) {
     case "waiting":
-      return isAdmin ? { to: "todo", label: "Activate now" } : null;
+      return canManage ? { to: "todo", label: "Activate now" } : null;
     case "todo":
-      return isMine || isAdmin ? { to: "in_progress", label: "Start" } : null;
+      return onTask || canManage ? { to: "in_progress", label: "Start" } : null;
     case "in_progress":
-      if (!isMine && !isAdmin) return null;
-      return task.requiresApproval && !isAdmin
+      if (!onTask && !canManage) return null;
+      return task.requiresApproval && !canApprove
         ? { to: "done", label: "Submit for approval" }
         : { to: "done", label: "Mark done" };
     case "awaiting_approval":
-      return isAdmin ? { to: "done", label: "Approve" } : null;
+      return canApprove ? { to: "done", label: "Approve" } : null;
     case "done":
-      return null; // reopen is a deliberate admin act on the task page, not a card button
+      return null; // reopen is a deliberate act on the task page, not a card button
   }
 }

@@ -39,6 +39,22 @@ export const userSkills = pgTable(
   (t) => [primaryKey({ columns: [t.userId, t.skillId] })],
 );
 
+/**
+ * Per-user capability grants (PLAN.md §3, refined). Admins hold everything
+ * implicitly; a member holds exactly the rows stored here. The closed set of
+ * keys lives in @mams/shared — keep the CHECK-free text column in sync there.
+ */
+export const userPermissions = pgTable(
+  "user_permissions",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    permission: text("permission").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.permission] })],
+);
+
 export const clients = pgTable(
   "clients",
   {
@@ -140,11 +156,10 @@ export const tasks = pgTable(
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
+    // A task is named by its stage — there is no separate title (owner request).
     stageId: uuid("stage_id").references(() => stages.id),
     chainPosition: integer("chain_position"),
-    title: text("title").notNull(),
     details: text("details"),
-    assigneeId: text("assignee_id").references(() => user.id),
     status: text("status").notNull().default("waiting"),
     requiresApproval: boolean("requires_approval").notNull().default(false),
     flagged: boolean("flagged").notNull().default(false),
@@ -162,7 +177,6 @@ export const tasks = pgTable(
     uniqueIndex("tasks_project_chain_position_uq")
       .on(t.projectId, t.chainPosition)
       .where(sql`${t.chainPosition} IS NOT NULL`),
-    index("tasks_assignee_status_idx").on(t.assigneeId, t.status),
     index("tasks_deadline_idx").on(t.deadline),
     index("tasks_project_id_idx").on(t.projectId),
     index("tasks_open_status_idx").on(t.status).where(sql`${t.status} <> 'done'`),
@@ -174,9 +188,9 @@ export const tasks = pgTable(
 );
 
 /**
- * Everyone working the task (owner + helpers). tasks.assignee_id stays the ONE
- * accountable owner and is always mirrored here; extra rows are helpers who
- * see the task in My Work and may act on it.
+ * Everyone working the task. There is no single owner (owner request: "multiple
+ * people can be assigned; there are no owners") — every row here is an equal
+ * assignee who sees the task in My Work and may act on it.
  */
 export const taskAssignees = pgTable(
   "task_assignees",

@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { schema } from "@mams/db";
+import { PERMISSIONS, type Permission } from "@mams/shared";
 import { TRPCError } from "@trpc/server";
 import { and, eq, ne } from "drizzle-orm";
 import { auth } from "../auth";
 import { db } from "../db";
 import { logActivity } from "./activity";
 
-const { user, account, session, userSkills, skills } = schema;
+const { user, account, session, userSkills, skills, userPermissions } = schema;
 
 async function passwordCtx() {
   const ctx = await auth.$context;
@@ -19,6 +20,8 @@ export async function listUsers() {
     .select({ userId: userSkills.userId, skillId: userSkills.skillId, name: skills.name })
     .from(userSkills)
     .innerJoin(skills, eq(userSkills.skillId, skills.id));
+  const grants = await db.select().from(userPermissions);
+  const known = new Set<string>(PERMISSIONS);
   return users.map((u) => ({
     id: u.id,
     name: u.name,
@@ -30,6 +33,14 @@ export async function listUsers() {
     skills: links
       .filter((l) => l.userId === u.id)
       .map((l) => ({ id: l.skillId, name: l.name })),
+    // admins hold everything implicitly — show that rather than an empty list
+    permissions:
+      u.role === "admin"
+        ? [...PERMISSIONS]
+        : grants
+            .filter((g) => g.userId === u.id)
+            .map((g) => g.permission)
+            .filter((p): p is Permission => known.has(p)),
   }));
 }
 
@@ -41,6 +52,7 @@ export async function createUser(
     tempPassword: string;
     role: "admin" | "member";
     skillIds: string[];
+    permissions: Permission[];
   },
 ) {
   const existing = await db.select({ id: user.id }).from(user).where(eq(user.email, input.email));
@@ -68,12 +80,17 @@ export async function createUser(
     if (input.skillIds.length > 0) {
       await tx.insert(userSkills).values(input.skillIds.map((skillId) => ({ userId: id, skillId })));
     }
+    if (input.role !== "admin" && input.permissions.length > 0) {
+      await tx
+        .insert(userPermissions)
+        .values(input.permissions.map((permission) => ({ userId: id, permission })));
+    }
     await logActivity(tx, {
       actorId,
       entityType: "user",
       entityId: id,
       action: "created",
-      detail: { role: input.role },
+      detail: { role: input.role, permissions: input.permissions },
     });
   });
   return { id };
@@ -93,6 +110,11 @@ export async function updateUser(
         updatedAt: new Date(),
       })
       .where(eq(user.id, input.id));
+    // promoting to admin makes explicit grants meaningless; demoting starts
+    // them from nothing so authority is never inherited by accident
+    if (input.role !== undefined) {
+      await tx.delete(userPermissions).where(eq(userPermissions.userId, input.id));
+    }
     await logActivity(tx, {
       actorId,
       entityType: "user",
@@ -117,6 +139,40 @@ export async function setSkills(actorId: string, input: { id: string; skillIds: 
       entityId: input.id,
       action: "skills_changed",
       detail: { skillIds: input.skillIds },
+    });
+  });
+}
+
+/**
+ * Replace a member's grants. Admins already hold everything, so storing rows
+ * for them would only be a lie waiting to drift — they are rejected instead.
+ */
+export async function setPermissions(
+  actorId: string,
+  input: { id: string; permissions: Permission[] },
+) {
+  const [target] = await db.select().from(user).where(eq(user.id, input.id));
+  if (!target) throw new TRPCError({ code: "NOT_FOUND" });
+  if (target.role === "admin") {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Admins already have every permission — change their role to limit them",
+    });
+  }
+  const wanted = [...new Set(input.permissions)];
+  await db.transaction(async (tx) => {
+    await tx.delete(userPermissions).where(eq(userPermissions.userId, input.id));
+    if (wanted.length > 0) {
+      await tx
+        .insert(userPermissions)
+        .values(wanted.map((permission) => ({ userId: input.id, permission })));
+    }
+    await logActivity(tx, {
+      actorId,
+      entityType: "user",
+      entityId: input.id,
+      action: "permissions_changed",
+      detail: { permissions: wanted },
     });
   });
 }

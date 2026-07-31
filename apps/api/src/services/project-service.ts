@@ -1,5 +1,5 @@
 import { schema } from "@mams/db";
-import type { Priority, ProjectStatus } from "@mams/shared";
+import { can, taskLabel, type Permission, type Priority, type ProjectStatus } from "@mams/shared";
 import { TRPCError } from "@trpc/server";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "../db";
@@ -9,9 +9,37 @@ import { logActivity } from "./activity";
 import { notifyUser } from "./notify";
 import { scheduleStageAutoReminder } from "./reminder-service";
 
-const { projects, clients, tasks, stages, templateStages, workflowTemplates, user } = schema;
+const { projects, clients, tasks, stages, templateStages, workflowTemplates, taskAssignees, user } =
+  schema;
 
-type Actor = { id: string; role: "admin" | "member"; name: string };
+type Actor = {
+  id: string;
+  role: "admin" | "member";
+  name: string;
+  permissions: readonly Permission[];
+};
+
+function assertCan(actor: Actor, permission: Permission) {
+  if (!can(actor, permission)) throw new TRPCError({ code: "FORBIDDEN" });
+}
+
+type Person = { id: string; name: string };
+
+/** taskId → the people on it, for the task sets the project screens render. */
+async function assigneesByTask(taskIds: string[]): Promise<Map<string, Person[]>> {
+  const map = new Map<string, Person[]>();
+  if (taskIds.length === 0) return map;
+  const rows = await db
+    .select({ taskId: taskAssignees.taskId, userId: taskAssignees.userId, name: user.name })
+    .from(taskAssignees)
+    .innerJoin(user, eq(taskAssignees.userId, user.id))
+    .where(inArray(taskAssignees.taskId, taskIds))
+    .orderBy(user.name);
+  for (const row of rows) {
+    map.set(row.taskId, [...(map.get(row.taskId) ?? []), { id: row.userId, name: row.name }]);
+  }
+  return map;
+}
 
 export async function listProjects(filters: {
   clientId?: string;
@@ -43,21 +71,21 @@ export async function listProjects(filters: {
   if (rows.length === 0) return [];
   const chainTasks = await db
     .select({
+      id: tasks.id,
       projectId: tasks.projectId,
       status: tasks.status,
       chainPosition: tasks.chainPosition,
       stageName: stages.name,
-      assigneeName: user.name,
     })
     .from(tasks)
     .leftJoin(stages, eq(tasks.stageId, stages.id))
-    .leftJoin(user, eq(tasks.assigneeId, user.id))
     .where(
       inArray(
         tasks.projectId,
         rows.map((r) => r.id),
       ),
     );
+  const peopleByTask = await assigneesByTask(chainTasks.map((t) => t.id));
 
   const today = todayISO(env.TZ_BUSINESS);
   return rows.map((p) => {
@@ -69,8 +97,8 @@ export async function listProjects(filters: {
       ...p,
       stagesDone: chain.filter((t) => t.status === "done").length,
       stagesTotal: chain.length,
-      currentStage: current?.stageName ?? null,
-      currentAssignee: current?.assigneeName ?? null,
+      currentStage: current ? taskLabel(current.stageName) : null,
+      currentAssignees: current ? (peopleByTask.get(current.id) ?? []).map((p) => p.name) : [],
       isLate: p.status === "active" && p.dueDate !== null && p.dueDate < today,
     };
   });
@@ -102,26 +130,30 @@ export async function getProject(id: string) {
   const projectTasks = await db
     .select({
       id: tasks.id,
-      title: tasks.title,
       status: tasks.status,
       chainPosition: tasks.chainPosition,
       deadline: tasks.deadline,
       startDate: tasks.startDate,
       flagged: tasks.flagged,
       requiresApproval: tasks.requiresApproval,
-      assigneeId: tasks.assigneeId,
-      assigneeName: user.name,
+      stageId: tasks.stageId,
       stageName: stages.name,
       checklist: tasks.checklist,
       driveLink: tasks.driveLink,
     })
     .from(tasks)
     .leftJoin(stages, eq(tasks.stageId, stages.id))
-    .leftJoin(user, eq(tasks.assigneeId, user.id))
     .where(eq(tasks.projectId, id))
     .orderBy(asc(tasks.chainPosition), asc(tasks.createdAt));
+  const peopleByTask = await assigneesByTask(projectTasks.map((t) => t.id));
 
-  return { ...project, tasks: projectTasks };
+  return {
+    ...project,
+    tasks: projectTasks.map((t) => {
+      const assignees = peopleByTask.get(t.id) ?? [];
+      return { ...t, assignees, assigneeIds: assignees.map((a) => a.id) };
+    }),
+  };
 }
 
 /** Create a project; snapshot the template into task rows (PLAN.md §5.2). */
@@ -138,9 +170,10 @@ export async function createProject(
     notes?: string;
     budget?: number;
     workflowTemplateId?: string;
-    firstAssigneeId?: string;
+    firstAssigneeIds?: string[];
   },
 ) {
+  assertCan(actor, "projects.manage");
   return db.transaction(async (tx) => {
     const [project] = await tx
       .insert(projects)
@@ -185,46 +218,47 @@ export async function createProject(
       throw new TRPCError({ code: "BAD_REQUEST", message: "Template has no stages" });
     }
 
-    const today = todayISO(env.TZ_BUSINESS);
+    // the first stage starts when the project does (or today, if unspecified)
+    const kickoff = input.startDate ?? todayISO(env.TZ_BUSINESS);
+    const firstAssignees = [...new Set(input.firstAssigneeIds ?? [])];
     for (const stage of chain) {
       const isFirst = stage.position === chain[0]!.position;
-      const deadline = isFirst ? addDaysISO(today, stage.defaultDurationDays) : null;
-      const assigneeId = isFirst ? (input.firstAssigneeId ?? null) : null;
+      const deadline = isFirst ? addDaysISO(kickoff, stage.defaultDurationDays) : null;
       const [task] = await tx
         .insert(tasks)
         .values({
           projectId: project!.id,
           stageId: stage.stageId,
           chainPosition: stage.position,
-          title: stage.stageName,
           requiresApproval: stage.requiresApproval,
           status: isFirst ? "todo" : "waiting",
-          assigneeId,
           activatedAt: isFirst ? new Date() : null,
-          startDate: isFirst ? today : null,
+          startDate: isFirst ? kickoff : null,
           deadline,
           createdBy: actor.id,
         })
         .returning();
-      if (isFirst && assigneeId) {
-        await tx
-          .insert(schema.taskAssignees)
-          .values({ taskId: task!.id, userId: assigneeId })
-          .onConflictDoNothing();
-        await scheduleStageAutoReminder(
-          tx,
-          { id: task!.id, assigneeId, deadline, title: task!.title },
-          stage.reminderRule,
-        );
-        if (assigneeId !== actor.id) {
-          await notifyUser(tx, assigneeId, {
-            type: "task_assigned",
-            title: `New task: ${task!.title} — ${input.title}`,
-            body: deadline ? `Due ${deadline}` : undefined,
-            entityType: "task",
-            entityId: task!.id,
-          });
-        }
+      if (!isFirst || firstAssignees.length === 0) continue;
+
+      await tx
+        .insert(taskAssignees)
+        .values(firstAssignees.map((userId) => ({ taskId: task!.id, userId })))
+        .onConflictDoNothing();
+      const label = taskLabel(stage.stageName);
+      await scheduleStageAutoReminder(
+        tx,
+        { id: task!.id, assigneeIds: firstAssignees, deadline, label },
+        stage.reminderRule,
+      );
+      for (const userId of firstAssignees) {
+        if (userId === actor.id) continue;
+        await notifyUser(tx, userId, {
+          type: "task_assigned",
+          title: `New task: ${label} — ${input.title}`,
+          body: deadline ? `Due ${deadline}` : undefined,
+          entityType: "task",
+          entityId: task!.id,
+        });
       }
     }
     return project!;
@@ -245,6 +279,7 @@ export async function updateProject(
     budget?: number | null;
   },
 ) {
+  assertCan(actor, "projects.manage");
   return db.transaction(async (tx) => {
     const { id, budget, ...rest } = input;
     const fields = {
@@ -265,6 +300,7 @@ export async function updateProject(
 }
 
 export async function setProjectStatus(actor: Actor, input: { id: string; status: ProjectStatus }) {
+  assertCan(actor, "projects.manage");
   return db.transaction(async (tx) => {
     const [row] = await tx.select().from(projects).where(eq(projects.id, input.id)).for("update");
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });

@@ -10,6 +10,7 @@ import { TRPCProvider } from "@/lib/trpc";
 import { AppLayout } from "@/routes/app-layout";
 import { CalendarPage } from "@/routes/calendar";
 import { ChangePasswordPage } from "@/routes/change-password";
+import { HomePage } from "@/routes/home";
 import { HomeRedirect } from "@/routes/home-redirect";
 import { LoginPage } from "@/routes/login";
 import { BoardPage } from "@/routes/board";
@@ -39,6 +40,7 @@ const router = createBrowserRouter([
     element: <AppLayout />,
     children: [
       { path: "/", element: <HomeRedirect /> },
+      { path: "/home", element: <HomePage /> },
       { path: "/my-work", element: <MyWorkPage /> },
       { path: "/board", element: <BoardPage /> },
       { path: "/calendar", element: <CalendarPage /> },
