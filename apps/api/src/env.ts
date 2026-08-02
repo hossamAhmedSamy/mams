@@ -5,8 +5,14 @@ const EnvSchema = z.object({
   PORT: z.coerce.number().default(8080),
   DATABASE_URL: z.string().default("postgres://mams:mams@localhost:5433/mams"),
   BETTER_AUTH_SECRET: z.string().min(16),
-  /** Public base URL of this service (onrender.com URL in trial mode). */
-  BETTER_AUTH_URL: z.string().default("http://localhost:8080"),
+  /**
+   * Public base URL of this service, and the origin better-auth signs cookies
+   * against. Render injects RENDER_EXTERNAL_URL, so a trial deploy configures
+   * its own auth origin — pointing this at the wrong host is the quietest way
+   * to break sign-in, and nobody should have to paste a URL they can only read
+   * off the dashboard after the service already exists.
+   */
+  BETTER_AUTH_URL: z.string().default(process.env.RENDER_EXTERNAL_URL ?? "http://localhost:8080"),
   /** Extra allowed origin during dev (the Vite server). */
   DEV_WEB_ORIGIN: z.string().default("http://localhost:5173"),
   JOB_TRIGGER_TOKEN: z.string().min(16),

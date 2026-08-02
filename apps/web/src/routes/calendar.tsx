@@ -7,10 +7,10 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ErrorBanner, SkeletonRows } from "@/components/ui/feedback";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Field, Input, Select } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { PeoplePicker } from "@/components/people-picker";
-import { colorForName, PageHeader } from "@/components/ui/page";
+import { PageHeader, toneForName } from "@/components/ui/page";
 import { addDaysISO, todayISO } from "@/lib/dates";
 import { useCan } from "@/lib/session";
 import { useTRPC } from "@/lib/trpc";
@@ -18,8 +18,18 @@ import { cn } from "@/lib/utils";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 
 type CalTask = {
@@ -55,13 +65,30 @@ export function CalendarPage() {
   const feed = useQuery(
     trpc.tasks.calendar.queryOptions({ from, to, userId: personFilter || undefined }),
   );
+  // Who is off, drawn under the work: the whole point of a shared calendar is
+  // not to hand someone a shoot on a day they told you they'd be away.
+  const leave = useQuery(trpc.hr.calendar.queryOptions({ from, to }));
+
+  const leaveByDay = useMemo(() => {
+    const map = new Map<string, { id: string; userName: string }[]>();
+    for (const off of leave.data ?? []) {
+      if (personFilter && off.userId !== personFilter) continue;
+      const start = off.startDate < from ? from : off.startDate;
+      const end = off.endDate > to ? to : off.endDate;
+      for (let d = start; d <= end; d = addDaysISO(d, 1)) {
+        map.set(d, [...(map.get(d) ?? []), { id: off.id, userName: off.userName }]);
+      }
+    }
+    return map;
+  }, [leave.data, personFilter, from, to]);
 
   const tasksByDay = useMemo(() => {
     const map = new Map<string, CalTask[]>();
     if (!feed.data) return map;
     for (const task of feed.data.tasks as CalTask[]) {
       if (!task.deadline) continue;
-      const start = task.startDate && task.startDate < task.deadline ? task.startDate : task.deadline;
+      const start =
+        task.startDate && task.startDate < task.deadline ? task.startDate : task.deadline;
       for (let d = start < from ? from : start; d <= task.deadline && d <= to; d = addDaysISO(d, 1)) {
         if (d < from) continue;
         const list = map.get(d) ?? [];
@@ -73,6 +100,7 @@ export function CalendarPage() {
   }, [feed.data, from, to]);
 
   const [year, month] = cursor.split("-").map(Number) as [number, number];
+  const colorByPerson = seesEveryone && !personFilter;
 
   function shiftMonth(delta: number) {
     const d = new Date(Date.UTC(year, month - 1 + delta, 1));
@@ -80,17 +108,21 @@ export function CalendarPage() {
   }
 
   return (
-    <div>
+    <div className="settle">
       <PageHeader
+        eyebrow={seesEveryone ? "The whole team" : "Your schedule"}
         title="Calendar"
         subtitle={
-          seesEveryone ? "Everyone's work, day by day — tap a day to add a task" : "Your work, day by day"
+          seesEveryone
+            ? "Everyone's work, day by day — tap a day to add a task"
+            : "Your work, day by day"
         }
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {seesEveryone && (
               <Select
                 className="w-40"
+                aria-label="Filter by person"
                 value={personFilter}
                 onChange={(e) => setPersonFilter(e.target.value)}
               >
@@ -104,22 +136,25 @@ export function CalendarPage() {
                   ))}
               </Select>
             )}
-            <div className="flex items-center rounded-lg border border-gray-300 bg-white">
+            <div className="flex items-center overflow-hidden rounded-field border border-rule bg-surface">
               <button
+                aria-label="Previous month"
                 onClick={() => shiftMonth(-1)}
-                className="flex size-9 items-center justify-center rounded-l-lg text-gray-500 hover:bg-gray-50"
+                className="flex size-9 items-center justify-center text-ink-400 transition-colors hover:bg-ink-50 hover:text-ink-900"
               >
                 <ChevronLeft size={17} />
               </button>
               <button
                 onClick={() => setCursor(today.slice(0, 7))}
-                className="border-x border-gray-200 px-3 text-sm font-medium text-gray-700 hover:bg-gray-50 h-9"
+                title="Jump to this month"
+                className="display h-9 border-x border-rule px-3.5 text-small text-ink-800 transition-colors hover:bg-ink-50"
               >
                 {MONTHS[month - 1]} {year}
               </button>
               <button
+                aria-label="Next month"
                 onClick={() => shiftMonth(1)}
-                className="flex size-9 items-center justify-center rounded-r-lg text-gray-500 hover:bg-gray-50"
+                className="flex size-9 items-center justify-center text-ink-400 transition-colors hover:bg-ink-50 hover:text-ink-900"
               >
                 <ChevronRight size={17} />
               </button>
@@ -129,17 +164,18 @@ export function CalendarPage() {
       />
 
       {feed.isError ? (
-        <ErrorBanner message="Couldn't load the calendar." onRetry={() => feed.refetch()} />
+        <ErrorBanner message="The calendar didn't load." onRetry={() => feed.refetch()} />
       ) : feed.isPending ? (
         <Card>
           <SkeletonRows rows={6} />
         </Card>
       ) : (
         <Card className="overflow-hidden">
-          <div className="grid grid-cols-7 border-b border-gray-100 bg-slate-50/60">
+          <div className="grid grid-cols-7 border-b border-rule bg-paper/70">
             {WEEKDAYS.map((d) => (
-              <div key={d} className="px-2 py-2 text-center text-xs font-semibold uppercase tracking-wide text-gray-400">
-                {d}
+              <div key={d} className="eyebrow px-2 py-2.5 text-center text-ink-400">
+                <span className="hidden sm:inline">{d}</span>
+                <span className="sm:hidden">{d[0]}</span>
               </div>
             ))}
           </div>
@@ -150,7 +186,8 @@ export function CalendarPage() {
                 cell={cell}
                 today={today}
                 tasks={tasksByDay.get(cell.date) ?? []}
-                colorByPerson={seesEveryone && !personFilter}
+                off={leaveByDay.get(cell.date) ?? []}
+                colorByPerson={colorByPerson}
                 onQuickAdd={canAddTasks ? () => setQuickAddDay(cell.date) : undefined}
               />
             ))}
@@ -158,12 +195,25 @@ export function CalendarPage() {
         </Card>
       )}
 
-      {quickAddDay && (
-        <QuickAddModal
-          day={quickAddDay}
-          onClose={() => setQuickAddDay(null)}
-        />
+      {/* The legend earns its place only when colour means a person. */}
+      {colorByPerson && users.data && (
+        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <span className="eyebrow text-ink-400">Who</span>
+          {users.data
+            .filter((u) => u.active)
+            .map((u) => (
+              <span key={u.id} className="inline-flex items-center gap-1.5 text-small text-ink-500">
+                <span
+                  className="size-2.5 rounded-[3px]"
+                  style={{ backgroundColor: toneForName(u.name) }}
+                />
+                {u.name}
+              </span>
+            ))}
+        </div>
       )}
+
+      {quickAddDay && <QuickAddModal day={quickAddDay} onClose={() => setQuickAddDay(null)} />}
     </div>
   );
 }
@@ -172,12 +222,14 @@ function DayCell({
   cell,
   today,
   tasks,
+  off,
   colorByPerson,
   onQuickAdd,
 }: {
   cell: { date: string; inMonth: boolean };
   today: string;
   tasks: CalTask[];
+  off: { id: string; userName: string }[];
   colorByPerson: boolean;
   onQuickAdd?: () => void;
 }) {
@@ -188,15 +240,19 @@ function DayCell({
   return (
     <div
       className={cn(
-        "group relative min-h-20 border-b border-r border-gray-100 p-1 sm:min-h-28 sm:p-1.5",
-        !cell.inMonth && "bg-slate-50/50",
+        "group relative min-h-20 border-b border-r border-rule-soft p-1 last:border-r-0 sm:min-h-28 sm:p-1.5",
+        !cell.inMonth && "bg-paper/60",
       )}
     >
       <div className="flex items-center justify-between">
         <span
           className={cn(
-            "flex size-6 items-center justify-center rounded-full text-xs font-medium",
-            isToday ? "bg-accent-600 text-white" : cell.inMonth ? "text-gray-700" : "text-gray-300",
+            "flex size-6 items-center justify-center rounded-[6px] font-mono text-small tabular-nums",
+            isToday
+              ? "bg-ink-900 font-medium text-white"
+              : cell.inMonth
+                ? "text-ink-600"
+                : "text-ink-200",
           )}
         >
           {day}
@@ -204,37 +260,68 @@ function DayCell({
         {onQuickAdd && (
           <button
             onClick={onQuickAdd}
-            title={`Add task on ${cell.date}`}
-            className="flex size-6 items-center justify-center rounded-md text-gray-300 transition-opacity hover:bg-accent-50 hover:text-accent-600 sm:opacity-0 sm:group-hover:opacity-100"
+            title={`Add a task due ${cell.date}`}
+            className="flex size-6 items-center justify-center rounded-[6px] text-ink-300 transition-opacity hover:bg-ink-50 hover:text-ink-900 sm:opacity-0 sm:group-hover:opacity-100"
           >
             <Plus size={14} />
           </button>
         )}
       </div>
       <div className="mt-1 space-y-1">
+        {/* Time off is drawn as absence — dashed and colourless, so it reads as
+            "nobody here" rather than competing with the work on the day. */}
+        {off.slice(0, 2).map((person) => (
+          <span
+            key={person.id}
+            title={`${person.userName} is off`}
+            className="block truncate rounded-[5px] border border-dashed border-ink-200 bg-ink-50/60 px-1.5 py-0.5 text-[11px] font-medium leading-4 text-ink-400"
+          >
+            {person.userName.split(" ")[0]} · off
+          </span>
+        ))}
+        {off.length > 2 && (
+          <p className="px-1 font-mono text-[10px] text-ink-300">+{off.length - 2} off</p>
+        )}
         {shown.map((task) => {
           const overdue = task.deadline !== null && task.deadline < today;
           const dueToday = task.deadline === cell.date;
           const label = taskLabel(task.stageName);
           const who = task.assignees.map((a) => a.name);
           const lead = who[0];
+
+          // Colour means one of two things and never both at once: whose day
+          // this is (team view) or how late it is (single-person view).
+          //
+          // In team view the pill is a *tint* of the person's colour with a
+          // solid edge, not a solid fill — a month of solid blocks turns the
+          // grid into a quilt and drowns out the deadline signals everywhere
+          // else in the app. The hue still reads; it just stops shouting.
+          const tone = colorByPerson && lead ? toneForName(lead) : null;
+          const personStyle = tone
+            ? {
+                backgroundColor: `color-mix(in srgb, ${tone} 13%, white)`,
+                borderLeft: `3px solid ${tone}`,
+                color: tone,
+              }
+            : undefined;
+
           return (
             <Link
               key={task.id}
               to={`/tasks/${task.id}`}
               title={`${label} — ${task.projectTitle} (${who.length > 0 ? who.join(", ") : "unassigned"})`}
+              style={personStyle}
               className={cn(
-                "block truncate rounded px-1.5 py-0.5 text-[11px] font-medium leading-4 text-white",
-                colorByPerson
-                  ? lead
-                    ? colorForName(lead)
-                    : "bg-gray-400"
-                  : overdue
-                    ? "bg-status-overdue"
-                    : dueToday
-                      ? "bg-status-due-soon"
-                      : "bg-accent-500",
-                dueToday && "ring-1 ring-inset ring-white/60",
+                "block truncate rounded-[5px] px-1.5 py-0.5 text-[11px] font-medium leading-4",
+                personStyle
+                  ? "font-semibold"
+                  : colorByPerson
+                    ? "border-l-[3px] border-l-ink-300 bg-ink-50 text-ink-500"
+                    : overdue
+                      ? "bg-late text-white"
+                      : dueToday
+                        ? "bg-now text-white"
+                        : "bg-ink-100 text-ink-600",
               )}
             >
               {colorByPerson && lead
@@ -245,7 +332,7 @@ function DayCell({
           );
         })}
         {tasks.length > 3 && (
-          <p className="px-1 text-[10px] font-medium text-gray-400">+{tasks.length - 3} more</p>
+          <p className="px-1 font-mono text-[10px] text-ink-400">+{tasks.length - 3} more</p>
         )}
       </div>
     </div>
@@ -277,7 +364,8 @@ function QuickAddModal({ day, onClose }: { day: string; onClose: () => void }) {
 
   return (
     <Modal
-      title={`New task · due ${day}`}
+      eyebrow={`Due ${day}`}
+      title="New task"
       onClose={onClose}
       footer={
         <>
@@ -302,8 +390,7 @@ function QuickAddModal({ day, onClose }: { day: string; onClose: () => void }) {
       }
     >
       <div className="space-y-4">
-        <div>
-          <Label htmlFor="qa-project">Project</Label>
+        <Field label="Project" htmlFor="qa-project">
           <Select id="qa-project" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
             <option value="">Choose a project…</option>
             {projects.data?.map((p) => (
@@ -312,9 +399,8 @@ function QuickAddModal({ day, onClose }: { day: string; onClose: () => void }) {
               </option>
             ))}
           </Select>
-        </div>
-        <div>
-          <Label htmlFor="qa-stage">Kind of work</Label>
+        </Field>
+        <Field label="Kind of work" htmlFor="qa-stage">
           <Select id="qa-stage" value={stageId} onChange={(e) => setStageId(e.target.value)}>
             <option value="">Choose…</option>
             {stages.data
@@ -325,9 +411,8 @@ function QuickAddModal({ day, onClose }: { day: string; onClose: () => void }) {
                 </option>
               ))}
           </Select>
-        </div>
-        <div>
-          <Label htmlFor="qa-start">Start date</Label>
+        </Field>
+        <Field label="Starts" htmlFor="qa-start">
           <Input
             id="qa-start"
             type="date"
@@ -335,11 +420,10 @@ function QuickAddModal({ day, onClose }: { day: string; onClose: () => void }) {
             max={day}
             onChange={(e) => setStartDate(e.target.value)}
           />
-        </div>
-        <div>
-          <Label>Who's on it</Label>
+        </Field>
+        <Field label="Who's on it">
           <PeoplePicker selected={assigneeIds} onChange={setAssigneeIds} />
-        </div>
+        </Field>
       </div>
     </Modal>
   );

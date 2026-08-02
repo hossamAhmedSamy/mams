@@ -2,8 +2,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
-import { Card, CardBody } from "@/components/ui/card";
-import { Input, Label } from "@/components/ui/input";
+import { Field, Input } from "@/components/ui/input";
+import { SlateMark } from "@/components/ui/slate-mark";
 import { useTRPC } from "@/lib/trpc";
 
 export function ChangePasswordPage() {
@@ -28,63 +28,61 @@ export function ChangePasswordPage() {
   function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    if (next.length < 10) return setError("New password must be at least 10 characters.");
-    if (next !== confirm) return setError("Passwords do not match.");
+    if (next.length < 10) return setError("Use at least 10 characters.");
+    if (next !== confirm) return setError("The two passwords don't match.");
     change.mutate({ currentPassword: current, newPassword: next });
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 p-4">
-      <div className="w-full max-w-sm">
-        <div className="mb-6 text-center">
-          <h1 className="text-xl font-bold text-gray-900">Set a new password</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            You're using a temporary password — choose your own to continue.
-          </p>
-        </div>
-        <Card>
-          <CardBody>
-            <form onSubmit={submit} className="space-y-4">
-              <div>
-                <Label htmlFor="current">Temporary password</Label>
-                <Input
-                  id="current"
-                  type="password"
-                  autoComplete="current-password"
-                  required
-                  value={current}
-                  onChange={(e) => setCurrent(e.target.value)}
-                />
-              </div>
-              <div>
-                <Label htmlFor="next">New password</Label>
-                <Input
-                  id="next"
-                  type="password"
-                  autoComplete="new-password"
-                  required
-                  value={next}
-                  onChange={(e) => setNext(e.target.value)}
-                />
-              </div>
-              <div>
-                <Label htmlFor="confirm">Confirm new password</Label>
-                <Input
-                  id="confirm"
-                  type="password"
-                  autoComplete="new-password"
-                  required
-                  value={confirm}
-                  onChange={(e) => setConfirm(e.target.value)}
-                />
-              </div>
-              {error && <p className="text-sm text-red-600">{error}</p>}
-              <Button type="submit" className="w-full" disabled={change.isPending}>
-                {change.isPending ? "Saving…" : "Save and continue"}
-              </Button>
-            </form>
-          </CardBody>
-        </Card>
+    <div className="flex min-h-screen items-center justify-center bg-paper px-5 py-12">
+      <div className="settle w-full max-w-sm">
+        <SlateMark size={24} className="mb-6 text-ink-900" />
+        <p className="eyebrow text-ink-400">One last thing</p>
+        <h1 className="display mt-2 text-h2 text-ink-900">Set your own password</h1>
+        <p className="mt-2 text-base text-ink-500">
+          You're signed in with a temporary password. Pick one only you know.
+        </p>
+
+        <form onSubmit={submit} className="mt-8 space-y-4">
+          <Field label="Temporary password" htmlFor="current">
+            <Input
+              id="current"
+              type="password"
+              autoComplete="current-password"
+              required
+              value={current}
+              onChange={(e) => setCurrent(e.target.value)}
+            />
+          </Field>
+          <Field label="New password" htmlFor="next" hint="At least 10 characters.">
+            <Input
+              id="next"
+              type="password"
+              autoComplete="new-password"
+              required
+              value={next}
+              onChange={(e) => setNext(e.target.value)}
+            />
+          </Field>
+          <Field label="Confirm new password" htmlFor="confirm">
+            <Input
+              id="confirm"
+              type="password"
+              autoComplete="new-password"
+              required
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+            />
+          </Field>
+          {error && (
+            <p className="rounded-field border-l-2 border-late bg-late-tint px-3 py-2 text-small text-late-ink">
+              {error}
+            </p>
+          )}
+          <Button type="submit" size="lg" className="w-full" disabled={change.isPending}>
+            {change.isPending ? "Saving…" : "Save and continue"}
+          </Button>
+        </form>
       </div>
     </div>
   );

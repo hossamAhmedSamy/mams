@@ -1,28 +1,67 @@
 import type { HTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
 
-const tones: Record<string, string> = {
-  gray: "bg-gray-100 text-gray-700",
-  accent: "bg-accent-50 text-accent-700",
-  red: "bg-red-50 text-red-700",
-  amber: "bg-amber-50 text-amber-700",
-  blue: "bg-blue-50 text-blue-700",
-  green: "bg-green-50 text-green-700",
-  orange: "bg-orange-50 text-orange-700",
+/**
+ * Status is set in the display face, wide and small, like the stamps on a call
+ * sheet. Only the three time signals carry colour; every other state is ink,
+ * so a screen full of tasks has at most three coloured marks on it.
+ */
+export type Tone = "neutral" | "ink" | "late" | "now" | "done";
+
+const tones: Record<Tone, string> = {
+  neutral: "bg-ink-50 text-ink-500",
+  ink: "bg-ink-100 text-ink-700",
+  late: "bg-late-tint text-late-ink",
+  now: "bg-now-tint text-now-ink",
+  done: "bg-done-tint text-done-ink",
+};
+
+const solid: Record<Tone, string> = {
+  neutral: "bg-ink-300 text-white",
+  ink: "bg-ink-800 text-white",
+  late: "bg-late text-white",
+  now: "bg-now text-white",
+  done: "bg-done text-white",
 };
 
 export function Badge({
-  tone = "gray",
+  tone = "neutral",
+  filled,
   className,
   ...props
-}: HTMLAttributes<HTMLSpanElement> & { tone?: keyof typeof tones }) {
+}: HTMLAttributes<HTMLSpanElement> & { tone?: Tone; filled?: boolean }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-        tones[tone],
+        "eyebrow inline-flex items-center gap-1 rounded-[5px] px-1.5 py-1",
+        filled ? solid[tone] : tones[tone],
         className,
       )}
+      {...props}
+    />
+  );
+}
+
+/**
+ * A number that means something — days late, items left, tasks due. Mono keeps
+ * figures aligned down a list, which is the whole point of a call sheet.
+ */
+export function Figure({
+  tone = "neutral",
+  className,
+  ...props
+}: HTMLAttributes<HTMLSpanElement> & { tone?: Tone }) {
+  const color =
+    tone === "late"
+      ? "text-late"
+      : tone === "now"
+        ? "text-now-ink"
+        : tone === "done"
+          ? "text-done"
+          : "text-ink-400";
+  return (
+    <span
+      className={cn("font-mono text-small font-medium tracking-tight", color, className)}
       {...props}
     />
   );

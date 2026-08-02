@@ -46,6 +46,8 @@ const TEMPLATES: { name: string; chain: string[] }[] = [
 ];
 
 const EXPENSE_CATEGORIES = [
+  // paid payslips post themselves into this one — hr-service looks it up by name
+  "Salaries",
   "Equipment rental",
   "Transport",
   "Talent",

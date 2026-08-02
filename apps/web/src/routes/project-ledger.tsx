@@ -7,9 +7,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState, ErrorBanner, SkeletonRows } from "@/components/ui/feedback";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Field, Input, Select } from "@/components/ui/input";
+import { Stat } from "@/components/ui/page";
 import { todayISO } from "@/lib/dates";
 import { useTRPC } from "@/lib/trpc";
+import { cn } from "@/lib/utils";
 import { BudgetBar } from "./project-detail";
 
 export function LedgerTab({ projectId }: { projectId: string }) {
@@ -41,29 +43,26 @@ export function LedgerTab({ projectId }: { projectId: string }) {
       </Card>
     );
   if (ledger.isError)
-    return <ErrorBanner message="Couldn't load the ledger." onRetry={() => ledger.refetch()} />;
+    return <ErrorBanner message="The ledger didn't load." onRetry={() => ledger.refetch()} />;
 
   const l = ledger.data;
 
   return (
     <div className="space-y-6">
-      {/* totals */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatTile label="Income" value={formatMoney(l.income)} tone="text-gray-900" />
-        <StatTile label="Spent (approved)" value={formatMoney(l.spent)} tone="text-gray-900" />
+        <StatTile label="Income" value={formatMoney(l.income)} />
+        <StatTile label="Spent (approved)" value={formatMoney(l.spent)} />
         <StatTile
           label="Profit"
           value={formatMoney(l.profit)}
-          tone={l.profit >= 0 ? "text-status-done" : "text-status-overdue"}
+          tone={l.profit >= 0 ? "done" : "late"}
         />
         <StatTile
           label={l.budget !== null ? "Budget left" : "Pending requests"}
           value={
             l.budget !== null ? formatMoney(l.remainingBudget ?? 0) : formatMoney(l.pendingAmount)
           }
-          tone={
-            l.budget !== null && (l.remainingBudget ?? 0) < 0 ? "text-status-overdue" : "text-gray-900"
-          }
+          tone={l.budget !== null && (l.remainingBudget ?? 0) < 0 ? "late" : "neutral"}
         />
       </div>
 
@@ -79,9 +78,12 @@ export function LedgerTab({ projectId }: { projectId: string }) {
           <CardTitle>Entries</CardTitle>
         </CardHeader>
         {l.expenses.length === 0 && l.incomes.length === 0 ? (
-          <EmptyState title="No money recorded yet" />
+          <EmptyState
+            title="No money recorded yet"
+            hint="Income and approved spend on this project both land here."
+          />
         ) : (
-          <ul className="divide-y divide-gray-50">
+          <ul className="divide-y divide-rule-soft">
             {l.incomes.map((inc) => (
               <LedgerRow
                 key={`i-${inc.id}`}
@@ -111,12 +113,19 @@ export function LedgerTab({ projectId }: { projectId: string }) {
   );
 }
 
-export function StatTile({ label, value, tone }: { label: string; value: string; tone?: string }) {
+export function StatTile({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  tone?: "neutral" | "late" | "now" | "done";
+}) {
   return (
     <Card>
-      <CardBody className="py-3">
-        <p className="text-xs font-medium uppercase tracking-wide text-gray-400">{label}</p>
-        <p className={`mt-1 text-lg font-semibold tabular-nums ${tone ?? "text-gray-900"}`}>{value}</p>
+      <CardBody className="py-3.5">
+        <Stat label={label} value={value} tone={tone} />
       </CardBody>
     </Card>
   );
@@ -143,30 +152,41 @@ function LedgerRow({
     <li className="flex items-center justify-between gap-3 px-5 py-3">
       <div className="min-w-0">
         <div className="flex items-center gap-2">
-          <p className="truncate text-sm font-medium text-gray-800">{title}</p>
-          {status === "pending" && <Badge tone="amber">Pending</Badge>}
-          {status === "rejected" && <Badge tone="red">Rejected</Badge>}
+          <p className="truncate text-base font-medium text-ink-800">{title}</p>
+          {status === "pending" && <Badge tone="now">Pending</Badge>}
+          {status === "rejected" && <Badge tone="late">Rejected</Badge>}
           {receiptLink && (
-            <a href={receiptLink} target="_blank" rel="noreferrer" className="text-accent-600">
+            <a
+              href={receiptLink}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Open receipt"
+              className="text-ink-400 transition-colors hover:text-ink-900"
+            >
               <ExternalLink size={13} />
             </a>
           )}
         </div>
-        <p className="truncate text-xs text-gray-400">{sub}</p>
+        <p className="truncate text-small text-ink-400">{sub}</p>
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <span
-          className={`text-sm font-semibold tabular-nums ${
+          className={cn(
+            "font-mono text-base font-medium tabular-nums",
             kind === "income"
-              ? "text-status-done"
+              ? "text-done"
               : status === "rejected"
-                ? "text-gray-300 line-through"
-                : "text-gray-800"
-          }`}
+                ? "text-ink-200 line-through"
+                : "text-ink-800",
+          )}
         >
           {amount}
         </span>
-        <button onClick={onDelete} className="rounded p-1 text-gray-300 hover:bg-red-50 hover:text-red-500">
+        <button
+          onClick={onDelete}
+          aria-label="Delete entry"
+          className="rounded-[6px] p-1 text-ink-300 transition-colors hover:bg-late-tint hover:text-late"
+        >
           <Trash2 size={14} />
         </button>
       </div>
@@ -199,30 +219,28 @@ function BudgetCard({
 
   return (
     <Card>
-      <CardBody className="flex flex-wrap items-center gap-4">
-        <div className="w-44">
-          <Label htmlFor="budget">Project budget (EGP)</Label>
+      <CardBody className="flex flex-wrap items-end gap-5">
+        <Field label="Project budget (EGP)" htmlFor="budget" className="w-52">
           <div className="flex gap-2">
             <Input
               id="budget"
               type="number"
               min={0}
-              placeholder="e.g. 20000"
+              placeholder="20000"
+              className="font-mono"
               value={value}
               onChange={(e) => setValue(e.target.value)}
             />
             <Button
               variant="secondary"
               disabled={update.isPending}
-              onClick={() =>
-                update.mutate({ id: projectId, budget: value ? Number(value) : null })
-              }
+              onClick={() => update.mutate({ id: projectId, budget: value ? Number(value) : null })}
             >
               Save
             </Button>
           </div>
-        </div>
-        <div className="min-w-40 flex-1">
+        </Field>
+        <div className="min-w-40 flex-1 pb-1">
           <BudgetBar spent={spent} budget={budget} />
         </div>
       </CardBody>
@@ -252,26 +270,40 @@ function AddIncomeCard({ projectId, onAdded }: { projectId: string; onAdded: () 
       <CardHeader>
         <CardTitle>Record income</CardTitle>
       </CardHeader>
-      <CardBody className="space-y-3">
+      <CardBody className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
-          <div>
-            <Label htmlFor="inc-amount">Amount (EGP)</Label>
-            <Input id="inc-amount" type="number" min={0} value={amount} onChange={(e) => setAmount(e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="inc-date">Date</Label>
+          <Field label="Amount (EGP)" htmlFor="inc-amount">
+            <Input
+              id="inc-amount"
+              type="number"
+              min={0}
+              className="font-mono"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
+          </Field>
+          <Field label="Date" htmlFor="inc-date">
             <Input id="inc-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          </div>
+          </Field>
         </div>
-        <div>
-          <Label htmlFor="inc-note">Note</Label>
-          <Input id="inc-note" placeholder="e.g. 50% down payment" value={note} onChange={(e) => setNote(e.target.value)} />
-        </div>
+        <Field label="Note" htmlFor="inc-note">
+          <Input
+            id="inc-note"
+            placeholder="50% down payment"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </Field>
         <Button
           size="sm"
           disabled={add.isPending || !amount}
           onClick={() =>
-            add.mutate({ projectId, amount: Number(amount), receivedOn: date, note: note || undefined })
+            add.mutate({
+              projectId,
+              amount: Number(amount),
+              receivedOn: date,
+              note: note || undefined,
+            })
           }
         >
           Add income
@@ -305,20 +337,24 @@ function AddExpenseCard({ projectId, onAdded }: { projectId: string; onAdded: ()
       <CardHeader>
         <CardTitle>Record expense</CardTitle>
       </CardHeader>
-      <CardBody className="space-y-3">
+      <CardBody className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
-          <div>
-            <Label htmlFor="exp-amount">Amount (EGP)</Label>
-            <Input id="exp-amount" type="number" min={0} value={amount} onChange={(e) => setAmount(e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="exp-date">Date</Label>
+          <Field label="Amount (EGP)" htmlFor="exp-amount">
+            <Input
+              id="exp-amount"
+              type="number"
+              min={0}
+              className="font-mono"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
+          </Field>
+          <Field label="Date" htmlFor="exp-date">
             <Input id="exp-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          </div>
+          </Field>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <div>
-            <Label htmlFor="exp-cat">Category</Label>
+          <Field label="Category" htmlFor="exp-cat">
             <Select id="exp-cat" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
               <option value="">Choose…</option>
               {categories.data?.map((c) => (
@@ -327,11 +363,15 @@ function AddExpenseCard({ projectId, onAdded }: { projectId: string; onAdded: ()
                 </option>
               ))}
             </Select>
-          </div>
-          <div>
-            <Label htmlFor="exp-note">Note</Label>
-            <Input id="exp-note" placeholder="e.g. lens rental" value={note} onChange={(e) => setNote(e.target.value)} />
-          </div>
+          </Field>
+          <Field label="Note" htmlFor="exp-note">
+            <Input
+              id="exp-note"
+              placeholder="Lens rental"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          </Field>
         </div>
         <Button
           size="sm"

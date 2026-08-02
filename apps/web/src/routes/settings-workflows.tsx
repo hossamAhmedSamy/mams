@@ -1,22 +1,24 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Plus, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Bell, Lock, Plus, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState, ErrorBanner, SkeletonRows } from "@/components/ui/feedback";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Field, Input, Label } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page";
 import { useTRPC } from "@/lib/trpc";
+import { cn } from "@/lib/utils";
 import { SettingsTabs } from "./settings-users";
 
 export function WorkflowsSettingsPage() {
   return (
-    <div>
+    <div className="settle">
       <PageHeader
+        eyebrow="How work moves"
         title="Workflows"
-        subtitle="Build the flows your projects follow — save them once, reuse forever"
+        subtitle="Build the flows your projects follow — save one once, reuse it forever"
       />
       <SettingsTabs current="workflows" />
       <div className="mt-6 space-y-6">
@@ -39,21 +41,21 @@ function TemplatesCard() {
 
   return (
     <Card>
-      <CardHeader className="flex items-center justify-between">
-        <div>
+      <CardHeader>
+        <div className="min-w-0">
           <CardTitle>Flows</CardTitle>
-          <p className="mt-0.5 text-sm text-gray-500">
-            A flow is an ordered chain of stages. New projects pick one and the chain is created
-            automatically — editing a flow never changes projects already running.
+          <p className="mt-1 max-w-2xl text-small text-ink-400">
+            A flow is an ordered chain of stages. New projects pick one and the chain is created for
+            them — editing a flow never touches projects already running.
           </p>
         </div>
-        <Button size="sm" onClick={() => setBuilding(true)}>
+        <Button size="sm" className="ml-auto" onClick={() => setBuilding(true)}>
           <Plus size={15} /> New flow
         </Button>
       </CardHeader>
 
       {building && (
-        <CardBody className="border-b border-gray-100 bg-slate-50/50">
+        <CardBody className="border-b border-rule-soft bg-paper/60">
           <FlowBuilder onDone={() => setBuilding(false)} />
         </CardBody>
       )}
@@ -62,10 +64,15 @@ function TemplatesCard() {
         <SkeletonRows rows={3} />
       ) : templates.isError ? (
         <CardBody>
-          <ErrorBanner message="Couldn't load flows." onRetry={() => templates.refetch()} />
+          <ErrorBanner message="Flows didn't load." onRetry={() => templates.refetch()} />
         </CardBody>
+      ) : templates.data.length === 0 ? (
+        <EmptyState
+          title="No flows yet"
+          hint="Build the chain a shoot actually follows once, and every project can reuse it."
+        />
       ) : (
-        <ul className="divide-y divide-gray-100">
+        <ul className="divide-y divide-rule-soft">
           {templates.data.map((tpl) => (
             <li key={tpl.id} className="px-5 py-4">
               {editingId === tpl.id ? (
@@ -81,19 +88,19 @@ function TemplatesCard() {
                   onDone={() => setEditingId(null)}
                 />
               ) : (
-                <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <p className="font-medium text-gray-900">{tpl.name}</p>
-                      {!tpl.active && <Badge tone="red">Hidden</Badge>}
+                      <p className="display text-lead text-ink-900">{tpl.name}</p>
+                      {!tpl.active && <Badge tone="neutral">Hidden</Badge>}
                     </div>
-                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1.5">
                       {tpl.chain.map((c, i) => (
                         <span key={c.position} className="flex items-center gap-1.5">
-                          {i > 0 && <span className="text-gray-300">→</span>}
-                          <Badge tone={c.requiresApproval ? "amber" : "gray"}>
+                          {i > 0 && <span className="text-ink-200">→</span>}
+                          <Badge tone={c.requiresApproval ? "now" : "ink"}>
                             {c.stageName}
-                            {c.requiresApproval ? " 🔒" : ""}
+                            {c.requiresApproval && <Lock size={9} strokeWidth={3} />}
                           </Badge>
                         </span>
                       ))}
@@ -135,6 +142,10 @@ function ToggleTemplateButton({ id, active }: { id: string; active: boolean }) {
   );
 }
 
+/**
+ * The one place in the app where numbering is honest: a flow *is* a sequence,
+ * and the number is the position the work will move through.
+ */
 function FlowBuilder({
   existing,
   onDone,
@@ -152,7 +163,7 @@ function FlowBuilder({
   const create = useMutation(
     trpc.workflows.createTemplate.mutationOptions({
       onSuccess: () => {
-        toast.success(`Flow "${name}" saved — it's now available when creating projects.`);
+        toast.success(`Flow "${name}" saved — projects can use it now.`);
         invalidate();
         onDone();
       },
@@ -162,7 +173,7 @@ function FlowBuilder({
   const update = useMutation(
     trpc.workflows.updateTemplate.mutationOptions({
       onSuccess: () => {
-        toast.success("Flow updated (running projects are unchanged).");
+        toast.success("Flow updated. Running projects are unchanged.");
         invalidate();
         onDone();
       },
@@ -189,56 +200,83 @@ function FlowBuilder({
   }
 
   return (
-    <div className="space-y-4">
-      <div className="max-w-sm">
-        <Label htmlFor="flow-name">Flow name</Label>
+    <div className="space-y-5">
+      <Field label="Flow name" htmlFor="flow-name" className="max-w-sm">
         <Input
           id="flow-name"
-          placeholder='e.g. "Event coverage"'
+          placeholder="Event coverage"
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
-      </div>
+      </Field>
 
       <div>
         <Label>Stages, in order</Label>
         {chain.length === 0 && (
-          <p className="mb-2 text-sm text-gray-400">No stages yet — add the first one below.</p>
+          <p className="mb-2 text-small text-ink-400">Nothing in this flow yet — add a stage below.</p>
         )}
         <ol className="space-y-2">
           {chain.map((step, i) => (
-            <li key={i} className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2">
-              <span className="w-6 text-center text-xs font-bold text-gray-400">{i + 1}</span>
-              <span className="flex-1 text-sm font-medium text-gray-800">{stageName(step.stageId)}</span>
-              <label className="flex items-center gap-1.5 text-xs text-gray-500" title="Adham must approve before the next stage starts">
+            <li
+              key={i}
+              className="flex items-center gap-2 rounded-field border border-rule bg-surface px-3 py-2"
+            >
+              <span className="w-6 shrink-0 text-center font-mono text-small tabular-nums text-ink-300">
+                {i + 1}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-base font-medium text-ink-800">
+                {stageName(step.stageId)}
+              </span>
+              <label
+                className="flex shrink-0 cursor-pointer items-center gap-1.5 text-small text-ink-500"
+                title="An approver must sign off before the next stage starts"
+              >
                 <input
                   type="checkbox"
-                  className="size-3.5 accent-accent-600"
+                  className="size-4 rounded-[4px] border-rule accent-ink-900"
                   checked={step.requiresApproval}
                   onChange={(e) =>
-                    setChain(chain.map((s, j) => (j === i ? { ...s, requiresApproval: e.target.checked } : s)))
+                    setChain(
+                      chain.map((s, j) =>
+                        j === i ? { ...s, requiresApproval: e.target.checked } : s,
+                      ),
+                    )
                   }
                 />
                 needs approval
               </label>
-              <button onClick={() => move(i, -1)} disabled={i === 0} className="rounded p-1 text-gray-400 hover:bg-gray-100 disabled:opacity-30">
+              <button
+                onClick={() => move(i, -1)}
+                disabled={i === 0}
+                aria-label="Move up"
+                className="rounded-[6px] p-1 text-ink-400 transition-colors hover:bg-ink-50 hover:text-ink-900 disabled:opacity-25"
+              >
                 <ArrowUp size={14} />
               </button>
-              <button onClick={() => move(i, 1)} disabled={i === chain.length - 1} className="rounded p-1 text-gray-400 hover:bg-gray-100 disabled:opacity-30">
+              <button
+                onClick={() => move(i, 1)}
+                disabled={i === chain.length - 1}
+                aria-label="Move down"
+                className="rounded-[6px] p-1 text-ink-400 transition-colors hover:bg-ink-50 hover:text-ink-900 disabled:opacity-25"
+              >
                 <ArrowDown size={14} />
               </button>
-              <button onClick={() => setChain(chain.filter((_, j) => j !== i))} className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500">
+              <button
+                onClick={() => setChain(chain.filter((_, j) => j !== i))}
+                aria-label="Remove stage"
+                className="rounded-[6px] p-1 text-ink-400 transition-colors hover:bg-late-tint hover:text-late"
+              >
                 <X size={14} />
               </button>
             </li>
           ))}
         </ol>
-        <div className="mt-2 flex flex-wrap gap-1.5">
+        <div className="mt-3 flex flex-wrap gap-1.5">
           {activeStages.map((s) => (
             <button
               key={s.id}
               onClick={() => setChain([...chain, { stageId: s.id, requiresApproval: false }])}
-              className="rounded-full border border-dashed border-gray-300 px-3 py-1 text-xs font-medium text-gray-500 hover:border-accent-500 hover:bg-accent-50 hover:text-accent-700"
+              className="rounded-full border border-dashed border-ink-200 px-3 py-1.5 text-small font-medium text-ink-500 transition-colors hover:border-ink-900 hover:text-ink-900"
             >
               + {s.name}
             </button>
@@ -294,40 +332,38 @@ function StageCatalogCard() {
 
   return (
     <Card>
-      <CardHeader className="flex items-center justify-between">
-        <div>
+      <CardHeader>
+        <div className="min-w-0">
           <CardTitle>Stage catalog</CardTitle>
-          <p className="mt-0.5 text-sm text-gray-500">
+          <p className="mt-1 max-w-2xl text-small text-ink-400">
             The building blocks of every flow: who can do a stage, and how many days it gets by
             default when it starts.
           </p>
         </div>
-        <Button variant="secondary" size="sm" onClick={() => setAdding((v) => !v)}>
+        <Button variant="secondary" size="sm" className="ml-auto" onClick={() => setAdding((v) => !v)}>
           <Plus size={15} /> New stage
         </Button>
       </CardHeader>
 
       {adding && (
-        <CardBody className="border-b border-gray-100 bg-slate-50/50">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div>
-              <Label htmlFor="st-name">Stage name</Label>
+        <CardBody className="border-b border-rule-soft bg-paper/60">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Field label="Stage name" htmlFor="st-name">
               <Input id="st-name" value={newName} onChange={(e) => setNewName(e.target.value)} />
-            </div>
-            <div>
-              <Label htmlFor="st-days">Default days</Label>
+            </Field>
+            <Field label="Default days" htmlFor="st-days">
               <Input
                 id="st-days"
                 type="number"
                 min={0}
                 max={60}
+                className="font-mono"
                 value={newDays}
                 onChange={(e) => setNewDays(Number(e.target.value))}
               />
-            </div>
-            <div>
-              <Label>Who can do it</Label>
-              <div className="flex flex-wrap gap-1.5 pt-1">
+            </Field>
+            <Field label="Who can do it">
+              <div className="flex flex-wrap gap-1.5">
                 {skills.data
                   ?.filter((s) => s.active)
                   .map((s) => {
@@ -335,23 +371,28 @@ function StageCatalogCard() {
                     return (
                       <button
                         key={s.id}
+                        type="button"
+                        aria-pressed={on}
                         onClick={() =>
-                          setNewSkillIds(on ? newSkillIds.filter((x) => x !== s.id) : [...newSkillIds, s.id])
+                          setNewSkillIds(
+                            on ? newSkillIds.filter((x) => x !== s.id) : [...newSkillIds, s.id],
+                          )
                         }
-                        className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+                        className={cn(
+                          "rounded-full border px-2.5 py-1 text-small font-medium transition-colors",
                           on
-                            ? "border-accent-600 bg-accent-50 text-accent-700"
-                            : "border-gray-300 bg-white text-gray-500"
-                        }`}
+                            ? "border-ink-900 bg-ink-900 text-white"
+                            : "border-rule bg-surface text-ink-500 hover:border-ink-300 hover:text-ink-900",
+                        )}
                       >
                         {s.name}
                       </button>
                     );
                   })}
               </div>
-            </div>
+            </Field>
           </div>
-          <div className="mt-3">
+          <div className="mt-4">
             <Button
               size="sm"
               disabled={createStage.isPending || !newName.trim()}
@@ -373,38 +414,48 @@ function StageCatalogCard() {
         <SkeletonRows rows={4} />
       ) : stages.isError ? (
         <CardBody>
-          <ErrorBanner message="Couldn't load stages." onRetry={() => stages.refetch()} />
+          <ErrorBanner message="Stages didn't load." onRetry={() => stages.refetch()} />
         </CardBody>
       ) : stages.data.length === 0 ? (
-        <EmptyState title="No stages yet" />
+        <EmptyState
+          title="No stages yet"
+          hint="A stage is one kind of work — “Shoot”, “Rough cut”, “Delivery”."
+        />
       ) : (
-        <ul className="divide-y divide-gray-100">
+        <ul className="divide-y divide-rule-soft">
           {stages.data.map((stage) => (
-            <li key={stage.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
+            <li
+              key={stage.id}
+              className={cn(
+                "flex flex-wrap items-center justify-between gap-3 px-5 py-3.5",
+                !stage.active && "opacity-60",
+              )}
+            >
               <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <p className="font-medium text-gray-900">{stage.name}</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-base font-medium text-ink-900">{stage.name}</p>
                   {stage.reminderRule === "end_of_last_day" && (
-                    <Badge tone="blue" title="Assignee gets a reminder at 6pm on the deadline day">
-                      ⏰ last-day reminder
+                    <Badge tone="ink" title="Whoever holds it is reminded at 6pm on the deadline day">
+                      <Bell size={9} strokeWidth={3} /> Last-day reminder
                     </Badge>
                   )}
-                  {!stage.active && <Badge tone="red">Hidden</Badge>}
+                  {!stage.active && <Badge tone="neutral">Hidden</Badge>}
                 </div>
-                <div className="mt-1 flex flex-wrap gap-1">
+                <div className="mt-1.5 flex flex-wrap gap-1">
                   {stage.skills.length === 0 ? (
-                    <span className="text-xs text-gray-400">Anyone</span>
+                    <span className="text-small text-ink-400">Anyone can do it</span>
                   ) : (
                     stage.skills.map((s) => <Badge key={s.id}>{s.name}</Badge>)
                   )}
                 </div>
               </div>
-              <div className="flex shrink-0 items-center gap-2 text-sm text-gray-500">
+              <div className="flex shrink-0 items-center gap-2">
                 <Input
                   type="number"
                   min={0}
                   max={60}
-                  className="w-16 text-center"
+                  aria-label={`Default days for ${stage.name}`}
+                  className="w-16 text-center font-mono"
                   defaultValue={stage.defaultDurationDays}
                   onBlur={(e) => {
                     const v = Number(e.target.value);
@@ -413,7 +464,7 @@ function StageCatalogCard() {
                     }
                   }}
                 />
-                <span className="text-xs">days</span>
+                <span className="text-small text-ink-400">days</span>
                 <Button
                   variant="ghost"
                   size="sm"

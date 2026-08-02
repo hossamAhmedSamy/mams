@@ -1,54 +1,215 @@
 @import "tailwindcss";
 
-/* MAMS visual system (PLAN.md §8.1): a warm neutral canvas, white surfaces,
-   one indigo accent. Status colors are the only other color in the app. */
+/* ============================================================================
+   MAMS — "Call Sheet"
+
+   A production agency runs on two things: who is holding the work, and how
+   long they have. So the interface is built from exactly those two ideas.
+
+   1. CHROME IS INK, WORK IS PAPER. Navigation is a dark ink rail; the work
+      itself sits on warm paper. The desk and the document. You always know
+      which one you are touching.
+   2. COLOUR IS TIME. Hue is spent only on time-pressure — late, now, done.
+      Nothing is coloured to look nice. A screen can be read at arm's length,
+      in sunlight, on a phone, mid-shoot, in under a second.
+   3. NUMBERS ARE MONO. Every date, count, delta and EGP figure is set in
+      JetBrains Mono so columns align and figures never reflow — the call
+      sheet convention, doing real work.
+   ========================================================================= */
+
 @theme {
-  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  /* ---- Type -------------------------------------------------------------
+     Archivo carries a width axis (62–125%), so display type is set WIDE.
+     That width is the app's voice; it appears nowhere else in the category. */
+  --font-sans: "Instrument Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Archivo Variable", "Instrument Sans Variable", sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", monospace;
 
-  --color-accent-50: #eef2ff;
-  --color-accent-100: #e0e7ff;
-  --color-accent-200: #c7d2fe;
-  --color-accent-300: #a5b4fc;
-  --color-accent-500: #6366f1;
-  --color-accent-600: #4f46e5;
-  --color-accent-700: #4338ca;
+  --text-eyebrow: 0.6875rem;
+  --text-eyebrow--line-height: 1.2;
+  --text-micro: 0.75rem;
+  --text-micro--line-height: 1.35;
+  --text-small: 0.8125rem;
+  --text-small--line-height: 1.45;
+  --text-base: 0.9375rem;
+  --text-base--line-height: 1.55;
+  --text-lead: 1.0625rem;
+  --text-lead--line-height: 1.5;
+  --text-title: 1.25rem;
+  --text-title--line-height: 1.3;
+  --text-h2: 1.5rem;
+  --text-h2--line-height: 1.2;
+  --text-h1: 2rem;
+  --text-h1--line-height: 1.08;
+  --text-hero: 2.75rem;
+  --text-hero--line-height: 1;
+  --text-mega: 4rem;
+  --text-mega--line-height: 0.92;
 
-  /* the canvas is a warm off-white so white cards read as raised, not flat */
-  --color-canvas: #faf9f7;
-  --color-hairline: #ecebe8;
+  /* ---- Ink: the chrome, and every level of text ------------------------- */
+  --color-ink-950: #0a0e12;
+  --color-ink-900: #11171d;
+  --color-ink-850: #171f27;
+  --color-ink-800: #1e2731;
+  --color-ink-700: #2c3742;
+  --color-ink-600: #414f5d;
+  --color-ink-500: #5b6b7a;
+  --color-ink-400: #7d8b99;
+  --color-ink-300: #a4afba;
+  --color-ink-200: #c9d1d8;
+  --color-ink-100: #e3e8ec;
+  --color-ink-50: #f1f4f6;
 
-  --color-status-overdue: #dc2626;
-  --color-status-due-soon: #d97706;
-  --color-status-progress: #2563eb;
-  --color-status-done: #16a34a;
-  --color-status-waiting: #9ca3af;
-  --color-status-flagged: #ea580c;
+  /* ---- Paper: the work surface -----------------------------------------
+     Warm paper under cool ink. The temperature gap is what makes a plain
+     white card read as a sheet lying on a desk rather than a div. */
+  --color-paper: #f5f4f0;
+  --color-surface: #ffffff;
+  --color-rule: #e5e2da;
+  --color-rule-soft: #efedE6;
 
-  --shadow-card: 0 1px 2px 0 rgb(16 24 40 / 0.05), 0 1px 3px 0 rgb(16 24 40 / 0.07);
-  --shadow-raised: 0 4px 12px -2px rgb(16 24 40 / 0.08), 0 2px 4px -2px rgb(16 24 40 / 0.05);
+  /* ---- Signal: the only colour in the app ------------------------------
+     late = past deadline or flagged · now = due today / running · done. */
+  --color-late: #c2402c;
+  --color-late-ink: #8d2b1c;
+  --color-late-tint: #fbeeeb;
+  --color-now: #cf8c17;
+  --color-now-ink: #855605;
+  --color-now-tint: #fdf3e1;
+  --color-now-bright: #e8a83a; /* saffron legible on ink */
+  --color-done: #3d7a5a;
+  --color-done-ink: #2b5b42;
+  --color-done-tint: #eaf3ee;
+
+  --radius-field: 10px;
+  --radius-card: 14px;
+  --radius-sheet: 20px;
+
+  --shadow-lift: 0 1px 2px rgb(15 20 25 / 0.04), 0 10px 28px -14px rgb(15 20 25 / 0.2);
+  --shadow-pop: 0 24px 60px -20px rgb(10 14 18 / 0.4), 0 2px 8px rgb(10 14 18 / 0.08);
+  --shadow-rail: 1px 0 0 rgb(10 14 18 / 0.06);
 }
 
+/* ---- Base ---------------------------------------------------------------- */
+
 html {
-  font-size: 15px;
   -webkit-tap-highlight-color: transparent;
+  scrollbar-gutter: stable;
 }
 
 body {
-  @apply bg-canvas text-gray-900 antialiased;
-  font-feature-settings: "tnum", "cv11";
-  letter-spacing: -0.011em;
+  @apply bg-paper text-ink-900 antialiased;
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.55;
 }
 
 ::selection {
-  @apply bg-accent-100 text-accent-700;
+  background: var(--color-ink-900);
+  color: var(--color-now-bright);
 }
+
+/* Numbers never wobble: mono is tabular and lining everywhere it appears. */
+code,
+kbd,
+samp,
+.font-mono {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+/* One focus treatment, high contrast, works on paper and on ink. */
+:focus-visible {
+  outline: 2px solid var(--color-now);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ---- Typographic utilities ----------------------------------------------
+   `display` is the app's voice: Archivo pushed wide. Used for page titles,
+   big figures and section eyebrows — and deliberately nowhere else. */
+
+@utility display {
+  font-family: var(--font-display);
+  font-variation-settings: "wdth" 112;
+  font-weight: 700;
+  letter-spacing: -0.022em;
+}
+
+@utility display-tight {
+  font-family: var(--font-display);
+  font-variation-settings: "wdth" 100;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+/* The call-sheet section marker: OVERDUE · 2 */
+@utility eyebrow {
+  font-family: var(--font-display);
+  font-variation-settings: "wdth" 118;
+  font-weight: 650;
+  font-size: var(--text-eyebrow);
+  line-height: 1.2;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+/* ---- Motion -------------------------------------------------------------
+   One orchestrated moment only: a page's sections settle in sequence on
+   arrival. No hover-flourish, no scroll effects — this is a tool. */
+
+@keyframes settle {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@utility settle {
+  animation: settle 0.34s cubic-bezier(0.22, 0.61, 0.36, 1) backwards;
+}
+
+/* Dialogs: a sheet rises from the thumb on a phone, a panel pops on a desk. */
+@keyframes sheet {
+  from {
+    transform: translateY(14px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@keyframes pop {
+  from {
+    transform: scale(0.97);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.stagger > * {
+  animation: settle 0.34s cubic-bezier(0.22, 0.61, 0.36, 1) backwards;
+}
+.stagger > *:nth-child(1) { animation-delay: 0ms; }
+.stagger > *:nth-child(2) { animation-delay: 40ms; }
+.stagger > *:nth-child(3) { animation-delay: 80ms; }
+.stagger > *:nth-child(4) { animation-delay: 120ms; }
+.stagger > *:nth-child(n + 5) { animation-delay: 160ms; }
 
 /* Phones: never let a tap target collapse below the thumb-friendly minimum. */
 @media (max-width: 640px) {
   button,
   [role="button"],
   a.tap {
-    min-height: 40px;
+    min-height: 42px;
   }
 }
 
@@ -57,6 +218,7 @@ body {
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
     transition-duration: 0.01ms !important;
   }
 }

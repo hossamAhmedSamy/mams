@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState, ErrorBanner, SkeletonRows } from "@/components/ui/feedback";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Field, Input, Select } from "@/components/ui/input";
 import { Avatar, PageHeader } from "@/components/ui/page";
 import { useMe } from "@/lib/session";
 import { useTRPC } from "@/lib/trpc";
@@ -20,16 +20,16 @@ export function SettingsTabs({ current }: { current: "team" | "workflows" }) {
     { key: "workflows", label: "Workflows", to: "/settings/workflows" },
   ] as const;
   return (
-    <div className="flex gap-1 border-b border-hairline">
+    <div className="flex gap-1 border-b border-rule">
       {tabs.map((t) => (
         <NavLink
           key={t.key}
           to={t.to}
           className={cn(
-            "border-b-2 px-4 py-2.5 text-sm font-medium",
+            "-mb-px border-b-2 px-4 py-2.5 text-base transition-colors",
             current === t.key
-              ? "border-accent-600 text-accent-700"
-              : "border-transparent text-gray-500 hover:text-gray-700",
+              ? "border-ink-900 font-medium text-ink-900"
+              : "border-transparent text-ink-400 hover:text-ink-700",
           )}
         >
           {t.label}
@@ -46,10 +46,11 @@ export function UsersSettingsPage() {
   const [showCreate, setShowCreate] = useState(false);
 
   return (
-    <div>
+    <div className="settle">
       <PageHeader
+        eyebrow="Who's on the team"
         title="Settings"
-        subtitle="Team accounts, skills, and what each person is allowed to do"
+        subtitle="Accounts, skills, and what each person is allowed to do"
         actions={
           <Button onClick={() => setShowCreate(true)}>
             <UserPlus size={16} /> Add member
@@ -68,12 +69,15 @@ export function UsersSettingsPage() {
             <SkeletonRows rows={4} />
           ) : users.isError ? (
             <CardBody>
-              <ErrorBanner message="Couldn't load the team." onRetry={() => users.refetch()} />
+              <ErrorBanner message="The team didn't load." onRetry={() => users.refetch()} />
             </CardBody>
           ) : users.data.length === 0 ? (
-            <EmptyState title="No members yet" hint="Add your first team member above." />
+            <EmptyState
+              title="No members yet"
+              hint="Add someone and they'll get a temporary password to change on first sign-in."
+            />
           ) : (
-            <ul className="divide-y divide-hairline">
+            <ul className="divide-y divide-rule-soft">
               {users.data.map((u) => (
                 <UserRow key={u.id} user={u} isSelf={u.id === me.data?.id} />
               ))}
@@ -114,26 +118,26 @@ function UserRow({ user, isSelf }: { user: UserItem; isSelf: boolean }) {
   }
 
   return (
-    <li className="px-5 py-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <Avatar name={user.name} />
+    <li className={cn("px-5 py-4", !user.active && "opacity-60")}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <Avatar name={user.name} size="lg" />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="truncate font-medium text-gray-900">{user.name}</p>
-              {user.role === "admin" && <Badge tone="accent">Admin · full access</Badge>}
-              {!user.active && <Badge tone="red">Inactive</Badge>}
-              {user.mustChangePassword && user.active && <Badge tone="amber">Temp password</Badge>}
+              <p className="display truncate text-lead text-ink-900">{user.name}</p>
+              {user.role === "admin" && <Badge tone="ink">Admin · full access</Badge>}
+              {!user.active && <Badge tone="neutral">Inactive</Badge>}
+              {user.mustChangePassword && user.active && <Badge tone="now">Temp password</Badge>}
             </div>
-            <p className="truncate text-sm text-gray-500">{user.email}</p>
-            <div className="mt-1 flex flex-wrap items-center gap-1">
+            <p className="truncate text-small text-ink-400">{user.email}</p>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
               {user.skills.length === 0 ? (
-                <span className="text-xs text-gray-400">No skills set</span>
+                <span className="text-small text-ink-400">No skills set</span>
               ) : (
                 user.skills.map((s) => <Badge key={s.id}>{s.name}</Badge>)
               )}
               {user.role !== "admin" && (
-                <span className="ml-1 inline-flex items-center gap-1 text-xs text-gray-400">
+                <span className="ml-1 inline-flex items-center gap-1 text-small text-ink-400">
                   <ShieldCheck size={12} />
                   {user.permissions.length === 0
                     ? "Own work only"
@@ -218,25 +222,23 @@ function PermissionsEditor({
   }
 
   return (
-    <div className="mt-3 rounded-xl border border-hairline bg-canvas p-4">
-      <div className="grid gap-5 sm:grid-cols-3">
+    <div className="mt-4 rounded-card border border-rule bg-paper/70 p-4">
+      <div className="grid gap-6 sm:grid-cols-3">
         {PERMISSION_GROUPS.map((group) => (
           <div key={group.title}>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-              {group.title}
-            </p>
-            <div className="space-y-2">
+            <p className="eyebrow mb-2.5 text-ink-400">{group.title}</p>
+            <div className="space-y-2.5">
               {group.items.map((item) => (
-                <label key={item.key} className="flex cursor-pointer items-start gap-2">
+                <label key={item.key} className="flex cursor-pointer items-start gap-2.5">
                   <input
                     type="checkbox"
                     checked={selected.includes(item.key)}
                     onChange={() => toggle(item.key)}
-                    className="mt-0.5 size-4 shrink-0 accent-accent-600"
+                    className="mt-0.5 size-4.5 shrink-0 rounded-[5px] border-rule accent-ink-900"
                   />
                   <span>
-                    <span className="block text-sm font-medium text-gray-800">{item.label}</span>
-                    <span className="block text-xs text-gray-500">{item.hint}</span>
+                    <span className="block text-base font-medium text-ink-800">{item.label}</span>
+                    <span className="block text-small leading-snug text-ink-400">{item.hint}</span>
                   </span>
                 </label>
               ))}
@@ -244,7 +246,7 @@ function PermissionsEditor({
           </div>
         ))}
       </div>
-      <div className="mt-4 flex gap-2">
+      <div className="mt-5 flex gap-2">
         <Button
           size="sm"
           disabled={save.isPending}
@@ -275,11 +277,11 @@ function SkillsEditor({
   const save = useMutation(trpc.users.setSkills.mutationOptions({ onSuccess: onDone }));
 
   if (skills.isPending) return <SkeletonRows rows={1} />;
-  if (skills.isError) return <ErrorBanner message="Couldn't load skills." />;
+  if (skills.isError) return <ErrorBanner message="Skills didn't load." />;
 
   return (
-    <div className="mt-3 rounded-xl border border-hairline bg-canvas p-3">
-      <p className="mb-2 text-xs text-gray-500">
+    <div className="mt-4 rounded-card border border-rule bg-paper/70 p-4">
+      <p className="mb-3 text-small text-ink-500">
         Skills decide who a stage can be handed to automatically.
       </p>
       <div className="flex flex-wrap gap-2">
@@ -291,21 +293,23 @@ function SkillsEditor({
               <button
                 key={s.id}
                 type="button"
+                aria-pressed={on}
                 onClick={() =>
                   setSelected((prev) => (on ? prev.filter((x) => x !== s.id) : [...prev, s.id]))
                 }
-                className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                className={cn(
+                  "rounded-full border px-3 py-1.5 text-small font-medium transition-colors",
                   on
-                    ? "border-accent-600 bg-accent-50 text-accent-700"
-                    : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
-                }`}
+                    ? "border-ink-900 bg-ink-900 text-white"
+                    : "border-rule bg-surface text-ink-600 hover:border-ink-300 hover:text-ink-900",
+                )}
               >
                 {s.name}
               </button>
             );
           })}
       </div>
-      <div className="mt-3 flex gap-2">
+      <div className="mt-4 flex gap-2">
         <Button
           size="sm"
           disabled={save.isPending}
@@ -354,12 +358,10 @@ function CreateUserCard({ onDone }: { onDone: () => void }) {
       </CardHeader>
       <CardBody>
         <form onSubmit={submit} className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <Label htmlFor="new-name">Name</Label>
+          <Field label="Name" htmlFor="new-name">
             <Input id="new-name" required value={name} onChange={(e) => setName(e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="new-email">Email</Label>
+          </Field>
+          <Field label="Email" htmlFor="new-email">
             <Input
               id="new-email"
               type="email"
@@ -367,9 +369,12 @@ function CreateUserCard({ onDone }: { onDone: () => void }) {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
-          </div>
-          <div>
-            <Label htmlFor="new-temp">Temp password (they'll change it)</Label>
+          </Field>
+          <Field
+            label="Temp password"
+            htmlFor="new-temp"
+            hint="They're asked to change it the first time they sign in."
+          >
             <Input
               id="new-temp"
               required
@@ -377,9 +382,8 @@ function CreateUserCard({ onDone }: { onDone: () => void }) {
               value={tempPassword}
               onChange={(e) => setTempPassword(e.target.value)}
             />
-          </div>
-          <div>
-            <Label htmlFor="new-role">Role</Label>
+          </Field>
+          <Field label="Role" htmlFor="new-role">
             <Select
               id="new-role"
               value={role}
@@ -388,21 +392,19 @@ function CreateUserCard({ onDone }: { onDone: () => void }) {
               <option value="member">Member</option>
               <option value="admin">Admin (everything)</option>
             </Select>
-          </div>
+          </Field>
           {role === "member" && (
             <fieldset className="sm:col-span-2">
-              <legend className="mb-2 flex items-center gap-1.5 text-sm font-medium text-gray-700">
-                <KeyRound size={14} /> What they can do
+              <legend className="eyebrow mb-2.5 flex items-center gap-1.5 text-ink-400">
+                <KeyRound size={13} /> What they can do
               </legend>
-              <div className="grid gap-4 rounded-xl border border-hairline bg-canvas p-3 sm:grid-cols-3">
+              <div className="grid gap-5 rounded-card border border-rule bg-paper/70 p-4 sm:grid-cols-3">
                 {PERMISSION_GROUPS.map((group) => (
                   <div key={group.title}>
-                    <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                      {group.title}
-                    </p>
-                    <div className="space-y-1.5">
+                    <p className="eyebrow mb-2 text-ink-400">{group.title}</p>
+                    <div className="space-y-2">
                       {group.items.map((item) => (
-                        <label key={item.key} className="flex cursor-pointer items-center gap-2">
+                        <label key={item.key} className="flex cursor-pointer items-center gap-2.5">
                           <input
                             type="checkbox"
                             checked={permissions.includes(item.key)}
@@ -413,9 +415,9 @@ function CreateUserCard({ onDone }: { onDone: () => void }) {
                                   : [...prev, item.key],
                               )
                             }
-                            className="size-4 accent-accent-600"
+                            className="size-4.5 shrink-0 rounded-[5px] border-rule accent-ink-900"
                           />
-                          <span className="text-sm text-gray-700">{item.label}</span>
+                          <span className="text-base text-ink-700">{item.label}</span>
                         </label>
                       ))}
                     </div>
@@ -424,7 +426,11 @@ function CreateUserCard({ onDone }: { onDone: () => void }) {
               </div>
             </fieldset>
           )}
-          {error && <p className="text-sm text-red-600 sm:col-span-2">{error}</p>}
+          {error && (
+            <p className="rounded-field border-l-2 border-late bg-late-tint px-3 py-2 text-small text-late-ink sm:col-span-2">
+              {error}
+            </p>
+          )}
           <div className="flex gap-2 sm:col-span-2">
             <Button type="submit" disabled={create.isPending}>
               {create.isPending ? "Creating…" : "Create member"}

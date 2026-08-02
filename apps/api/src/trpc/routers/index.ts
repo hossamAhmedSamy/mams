@@ -3,6 +3,7 @@ import { activityRouter } from "./activity";
 import { clientsRouter } from "./clients";
 import { commentsRouter } from "./comments";
 import { financeRouter } from "./finance";
+import { hrRouter } from "./hr";
 import { projectsRouter } from "./projects";
 import { skillsRouter } from "./skills";
 import { tasksRouter } from "./tasks";
@@ -19,6 +20,7 @@ export const appRouter = router({
   activity: activityRouter,
   workflows: workflowsRouter,
   finance: financeRouter,
+  hr: hrRouter,
 });
 
 export type AppRouter = typeof appRouter;

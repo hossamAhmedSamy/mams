@@ -36,21 +36,36 @@ pnpm --filter @mams/api test
 
 ## Deploy — trial mode ($0/month)
 
-1. **Neon**: create a project → copy the pooled `DATABASE_URL`.
-2. **Render**: new **Web Service** from this repo (free instance).
-   - Build: `corepack enable && pnpm install --frozen-lockfile && pnpm --filter @mams/web build`
-   - Pre-deploy (or one-off shell): `pnpm db:migrate && pnpm db:seed`
-   - Start: `pnpm --filter @mams/api start`
-   - Env vars: `DATABASE_URL`, `BETTER_AUTH_SECRET` (32+ random chars),
-     `BETTER_AUTH_URL` (the service's `https://….onrender.com` URL),
-     `JOB_TRIGGER_TOKEN` (long random), `NODE_ENV=production`.
-3. **Seed the admin** (Render shell):
-   `SEED_ADMIN_EMAIL=… SEED_ADMIN_PASSWORD=… pnpm --filter @mams/api seed:admin`
-4. **External cron** (keeps jobs firing despite free-tier spin-down):
-   on [cron-job.org](https://cron-job.org) (free), create a job every **10 minutes**:
+[`render.yaml`](render.yaml) is a Render Blueprint: it declares the whole service,
+so this is four steps rather than a page of dashboard settings.
+
+1. **Neon**: create a project → copy the **pooled** connection string (it ends in
+   `?sslmode=require`). That is `DATABASE_URL`.
+2. **Render**: **New → Blueprint** → pick this repo. Render reads `render.yaml`
+   and asks for the four values it cannot generate:
+   - `DATABASE_URL` — from step 1.
+   - `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` — the first admin account
+     (10+ chars; it is temporary, the app forces a change on first login).
+   - `SEED_ADMIN_NAME` — optional, defaults to `Adham`.
+
+   `BETTER_AUTH_SECRET` and `JOB_TRIGGER_TOKEN` are generated for you, and
+   `BETTER_AUTH_URL` resolves itself from Render's `RENDER_EXTERNAL_URL`.
+3. **Deploy.** The build runs migrations, seeds reference data and creates the
+   admin — free instances have no Shell and no pre-deploy hook, so all three
+   live in the build step. Every one is idempotent.
+4. **External cron** (keeps reminders firing despite free-tier spin-down): on
+   [cron-job.org](https://cron-job.org) (free), a job every **10 minutes**:
    `POST https://<service>.onrender.com/jobs/tick` with header
-   `Authorization: Bearer <JOB_TRIGGER_TOKEN>`.
-5. Done. The SPA, API, and (later) MCP endpoint all live on the one URL.
+   `Authorization: Bearer <JOB_TRIGGER_TOKEN>` (copy it from Render → Environment).
+
+Then delete `SEED_ADMIN_PASSWORD` from the Render environment, and add everyone
+else from inside the app (Settings → Team).
+
+**What the client should expect on the free tier.** The instance sleeps after 15
+minutes of no traffic, so the first request after a quiet spell takes ~30–60s to
+answer; everything after that is normal. The 10-minute cron doubles as a keep-alive,
+which fits inside the 750 free instance-hours a month. Neon's compute also idles,
+adding ~0.5s to the first query. Fine for a trial, not for a launch.
 
 **Paid mode** (when the client converts): Render Starter + custom domain + SPA on
 Vercel — see PLAN.md §1.3 for the checklist. No code changes.

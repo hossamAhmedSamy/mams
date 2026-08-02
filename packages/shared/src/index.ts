@@ -22,6 +22,7 @@ export const PERMISSIONS = [
   "team.viewAll",
   "money.view",
   "money.manage",
+  "hr.manage",
   "settings.workflows",
   "settings.team",
 ] as const;
@@ -65,6 +66,16 @@ export const PERMISSION_GROUPS: {
         key: "money.manage",
         label: "Manage the money",
         hint: "Record income and expenses, decide requests",
+      },
+    ],
+  },
+  {
+    title: "People",
+    items: [
+      {
+        key: "hr.manage",
+        label: "Handle time off & pay",
+        hint: "Decide leave requests, set salaries, run payroll",
       },
     ],
   },
@@ -130,11 +141,161 @@ export const NOTIFICATION_TYPES = [
   "comment_added",
   "expense_requested",
   "expense_decided",
+  "leave_requested",
+  "leave_decided",
+  "payslip_paid",
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
 export const EXPENSE_STATUSES = ["pending", "approved", "rejected"] as const;
 export type ExpenseStatus = (typeof EXPENSE_STATUSES)[number];
+
+// ---------------------------------------------------------------------------
+// HR — time off and pay (owner request, 2026-08-02)
+//
+// Egyptian practice, kept deliberately small: one yearly allowance of paid
+// days, casual leave carved out of that same allowance, sick leave on its own
+// pool, and unpaid days that cost salary instead of balance. Days are plain
+// calendar days between the two dates — the owner asked for "simple", so no
+// weekend or public-holiday arithmetic hides inside a number he has to trust.
+// ---------------------------------------------------------------------------
+
+export const LEAVE_TYPES = ["annual", "casual", "sick", "unpaid"] as const;
+export type LeaveType = (typeof LEAVE_TYPES)[number];
+
+export const LEAVE_STATUSES = ["pending", "approved", "rejected", "canceled"] as const;
+export type LeaveStatus = (typeof LEAVE_STATUSES)[number];
+
+/** Yearly days per pool. Overridable per person per year in the People screen. */
+export const DEFAULT_ALLOWANCE = { annual: 21, casual: 7, sick: 15 } as const;
+
+export const LEAVE_TYPE_LABELS: Record<LeaveType, string> = {
+  annual: "Annual leave",
+  casual: "Casual leave",
+  sick: "Sick leave",
+  unpaid: "Unpaid leave",
+};
+
+export const LEAVE_TYPE_HINTS: Record<LeaveType, string> = {
+  annual: "Planned days off — comes out of your 21 days",
+  casual: "Something came up at short notice — also comes out of the 21",
+  sick: "Illness — its own pool, never touches your annual days",
+  unpaid: "No balance left or none needed — the days come off that month's pay",
+};
+
+/** Which pool a type draws from. Casual is carved out of the annual 21. */
+export const LEAVE_POOL: Record<LeaveType, "annual" | "sick" | "none"> = {
+  annual: "annual",
+  casual: "annual",
+  sick: "sick",
+  unpaid: "none",
+};
+
+export const LEAVE_STATUS_LABELS: Record<LeaveStatus, string> = {
+  pending: "Waiting on Adham",
+  approved: "Approved",
+  rejected: "Rejected",
+  canceled: "Canceled",
+};
+
+/** Inclusive calendar days between two YYYY-MM-DD dates. 1 day = same day. */
+export function leaveDays(startDate: string, endDate: string): number {
+  return Math.round((Date.parse(endDate) - Date.parse(startDate)) / 86_400_000) + 1;
+}
+
+export type LeaveBalance = {
+  annual: { allowed: number; used: number; left: number };
+  casual: { allowed: number; used: number; left: number };
+  sick: { allowed: number; used: number; left: number };
+  unpaid: { used: number };
+};
+
+/**
+ * The one place a balance is computed, so the member's screen, the approval
+ * queue and the payroll deduction can never disagree about what is left.
+ * `used` counts approved days only — a pending request reserves nothing.
+ */
+export function leaveBalance(
+  allowance: { annual: number; casual: number; sick: number },
+  usedByType: Partial<Record<LeaveType, number>>,
+): LeaveBalance {
+  const annualUsed = (usedByType.annual ?? 0) + (usedByType.casual ?? 0);
+  const casualUsed = usedByType.casual ?? 0;
+  const sickUsed = usedByType.sick ?? 0;
+  return {
+    annual: { allowed: allowance.annual, used: annualUsed, left: allowance.annual - annualUsed },
+    // casual is capped twice: by its own yearly cap and by what annual has left
+    casual: {
+      allowed: allowance.casual,
+      used: casualUsed,
+      left: Math.min(allowance.casual - casualUsed, allowance.annual - annualUsed),
+    },
+    sick: { allowed: allowance.sick, used: sickUsed, left: allowance.sick - sickUsed },
+    unpaid: { used: usedByType.unpaid ?? 0 },
+  };
+}
+
+/** Days of this request that no balance covers — they cost pay, not balance. */
+export function daysBeyondBalance(type: LeaveType, days: number, balance: LeaveBalance): number {
+  if (type === "unpaid") return days;
+  const left = type === "sick" ? balance.sick.left : type === "casual" ? balance.casual.left : balance.annual.left;
+  return Math.max(0, days - Math.max(0, left));
+}
+
+// ---------------------------------------------------------------------------
+// Payroll
+// ---------------------------------------------------------------------------
+
+export const PAYSLIP_STATUSES = ["draft", "paid"] as const;
+export type PayslipStatus = (typeof PAYSLIP_STATUSES)[number];
+
+/** Bonus adds to the payslip; everything else is taken off it. */
+export const ADJUSTMENT_KINDS = ["bonus", "deduction", "advance", "leave_deduction"] as const;
+export type AdjustmentKind = (typeof ADJUSTMENT_KINDS)[number];
+
+export const ADJUSTMENT_LABELS: Record<AdjustmentKind, string> = {
+  bonus: "Bonus",
+  deduction: "Deduction",
+  advance: "Advance taken",
+  leave_deduction: "Unpaid days",
+};
+
+export function adjustmentSign(kind: AdjustmentKind): 1 | -1 {
+  return kind === "bonus" ? 1 : -1;
+}
+
+/** Net pay from a base and its adjustments. Never below zero. */
+export function payslipNet(
+  base: number | string,
+  adjustments: { kind: AdjustmentKind; amount: number | string }[],
+): number {
+  const net = adjustments.reduce(
+    (total, a) => total + adjustmentSign(a.kind) * Number(a.amount),
+    Number(base),
+  );
+  return Math.max(0, Math.round(net * 100) / 100);
+}
+
+/**
+ * What a day off costs when it comes out of pay. A month is treated as 30 days
+ * — the convention Egyptian payroll uses, and the one a person can check in
+ * their head.
+ */
+export const PAYROLL_DAYS_IN_MONTH = 30;
+
+export function dailyRate(monthlyAmount: number | string): number {
+  return Math.round((Number(monthlyAmount) / PAYROLL_DAYS_IN_MONTH) * 100) / 100;
+}
+
+/** "August 2026" from a YYYY-MM period. */
+export function periodLabel(period: string): string {
+  const [y, m] = period.split("-").map(Number) as [number, number];
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-GB", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Task state machine (PLAN.md §5.3) — the only legal transitions.

@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState, ErrorBanner, SkeletonRows } from "@/components/ui/feedback";
-import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page";
 import { todayISO } from "@/lib/dates";
 import { useTRPC } from "@/lib/trpc";
@@ -19,10 +19,11 @@ export function ExpensesPage() {
   const [showForm, setShowForm] = useState(false);
 
   return (
-    <div className="space-y-6">
+    <div className="settle">
       <PageHeader
+        eyebrow="Your spend"
         title="Expenses"
-        subtitle="Paid for something? Request it here — Adham gets notified instantly"
+        subtitle="Paid for something on a shoot? Claim it here and Adham is notified straight away"
         actions={
           <Button onClick={() => setShowForm((v) => !v)}>
             <Plus size={16} /> Request expense
@@ -30,7 +31,11 @@ export function ExpensesPage() {
         }
       />
 
-      {showForm && <RequestForm onDone={() => setShowForm(false)} />}
+      {showForm && (
+        <div className="mb-6">
+          <RequestForm onDone={() => setShowForm(false)} />
+        </div>
+      )}
 
       <Card>
         <CardHeader>
@@ -40,15 +45,15 @@ export function ExpensesPage() {
           <SkeletonRows rows={3} />
         ) : mine.isError ? (
           <CardBody>
-            <ErrorBanner message="Couldn't load your requests." onRetry={() => mine.refetch()} />
+            <ErrorBanner message="Your requests didn't load." onRetry={() => mine.refetch()} />
           </CardBody>
         ) : mine.data.length === 0 ? (
           <EmptyState
-            title="No requests yet"
-            hint="Rented gear, transport, props — request it and keep the receipt link."
+            title="Nothing claimed yet"
+            hint="Rented gear, transport, props — claim it here and keep the receipt link with it."
           />
         ) : (
-          <ul className="divide-y divide-gray-50">
+          <ul className="divide-y divide-rule-soft">
             {mine.data.map((exp) => (
               <RequestRow key={exp.id} exp={exp} />
             ))}
@@ -86,23 +91,27 @@ function RequestRow({
   );
 
   return (
-    <li className="px-5 py-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <li className="px-5 py-3.5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold tabular-nums text-gray-900">{formatMoney(exp.amount)}</span>
-            {exp.status === "pending" && <Badge tone="amber">Waiting for Adham</Badge>}
-            {exp.status === "approved" && <Badge tone="green">Approved ✓</Badge>}
-            {exp.status === "rejected" && <Badge tone="red">Rejected</Badge>}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-lead font-medium tabular-nums text-ink-900">
+              {formatMoney(exp.amount)}
+            </span>
+            {exp.status === "pending" && <Badge tone="now">Waiting on Adham</Badge>}
+            {exp.status === "approved" && <Badge tone="done">Approved</Badge>}
+            {exp.status === "rejected" && <Badge tone="late">Rejected</Badge>}
           </div>
-          <p className="mt-0.5 text-sm text-gray-600">{exp.note}</p>
-          <p className="text-xs text-gray-400">
+          <p className="mt-1 text-base text-ink-700">{exp.note}</p>
+          <p className="mt-0.5 text-small text-ink-400">
             {exp.categoryName}
-            {exp.projectTitle ? ` · ${exp.projectTitle}` : " · General"} · {exp.spentOn}
+            {exp.projectTitle ? ` · ${exp.projectTitle}` : " · General"}
+            {" · "}
+            <span className="font-mono">{exp.spentOn}</span>
           </p>
           {exp.status === "rejected" && exp.decisionNote && (
-            <p className="mt-1 rounded bg-red-50 px-2 py-1 text-xs text-red-700">
-              “{exp.decisionNote}”
+            <p className="mt-2 rounded-[8px] border-l-2 border-late bg-late-tint px-2.5 py-1.5 text-small text-late-ink">
+              {exp.decisionNote}
             </p>
           )}
         </div>
@@ -165,21 +174,25 @@ function RequestForm({ onDone }: { onDone: () => void }) {
             });
           }}
         >
-          <div>
-            <Label htmlFor="rq-amount">Amount (EGP)</Label>
+          <Field label="Amount (EGP)" htmlFor="rq-amount">
             <Input
               id="rq-amount"
               type="number"
               inputMode="decimal"
               min={1}
               required
+              className="font-mono"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
             />
-          </div>
-          <div>
-            <Label htmlFor="rq-cat">Category</Label>
-            <Select id="rq-cat" required value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+          </Field>
+          <Field label="Category" htmlFor="rq-cat">
+            <Select
+              id="rq-cat"
+              required
+              value={categoryId}
+              onChange={(e) => setCategoryId(e.target.value)}
+            >
               <option value="">Choose…</option>
               {categories.data?.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -187,9 +200,8 @@ function RequestForm({ onDone }: { onDone: () => void }) {
                 </option>
               ))}
             </Select>
-          </div>
-          <div>
-            <Label htmlFor="rq-project">Project (if any)</Label>
+          </Field>
+          <Field label="Project (if any)" htmlFor="rq-project">
             <Select id="rq-project" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
               <option value="">General / not project-related</option>
               {projects.data?.map((p) => (
@@ -198,24 +210,26 @@ function RequestForm({ onDone }: { onDone: () => void }) {
                 </option>
               ))}
             </Select>
-          </div>
-          <div>
-            <Label htmlFor="rq-date">Date paid</Label>
+          </Field>
+          <Field label="Date paid" htmlFor="rq-date">
             <Input id="rq-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          </div>
-          <div className="sm:col-span-2">
-            <Label htmlFor="rq-note">What was it for?</Label>
+          </Field>
+          <Field label="What was it for?" htmlFor="rq-note" className="sm:col-span-2">
             <Textarea
               id="rq-note"
               required
               minLength={3}
-              placeholder="e.g. Rented 85mm lens for the Kuja shoot"
+              placeholder="Rented an 85mm lens for the Kuja shoot"
               value={note}
               onChange={(e) => setNote(e.target.value)}
             />
-          </div>
-          <div className="sm:col-span-2">
-            <Label htmlFor="rq-receipt">Receipt photo link (Drive, optional)</Label>
+          </Field>
+          <Field
+            label="Receipt link (optional)"
+            htmlFor="rq-receipt"
+            className="sm:col-span-2"
+            hint="A photo of the receipt in Drive keeps the claim airtight."
+          >
             <Input
               id="rq-receipt"
               type="url"
@@ -223,9 +237,12 @@ function RequestForm({ onDone }: { onDone: () => void }) {
               value={receiptLink}
               onChange={(e) => setReceiptLink(e.target.value)}
             />
-          </div>
+          </Field>
           <div className="flex gap-2 sm:col-span-2">
-            <Button type="submit" disabled={request.isPending || !amount || !categoryId || !note.trim()}>
+            <Button
+              type="submit"
+              disabled={request.isPending || !amount || !categoryId || !note.trim()}
+            >
               {request.isPending ? "Sending…" : "Send request"}
             </Button>
             <Button type="button" variant="ghost" onClick={onDone}>

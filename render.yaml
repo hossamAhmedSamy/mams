@@ -1,0 +1,55 @@
+# Render Blueprint — MAMS trial mode ($0/month).
+#
+# One free web service serves the SPA, the tRPC API and the job endpoint from a
+# single origin (see the static handler at the end of apps/api/src/app.ts), so
+# there is no CORS surface and no second deploy to keep in step. The database
+# lives on Neon's free tier; put its pooled URL in DATABASE_URL.
+#
+# Free instances have no Shell and no pre-deploy hook, so migrations, reference
+# data and the first admin all run inside the build. Each of those is
+# idempotent, which is what makes it safe to repeat on every deploy.
+
+services:
+  - type: web
+    name: mams
+    runtime: node
+    plan: free
+    region: frankfurt # nearest Render region to Cairo
+    branch: main
+    healthCheckPath: /healthz
+    # Chained with && so a failed migration fails the deploy instead of
+    # quietly shipping a build against the wrong schema.
+    buildCommand: >-
+      corepack enable &&
+      pnpm install --frozen-lockfile --prod=false &&
+      pnpm --filter @mams/web build &&
+      pnpm db:migrate &&
+      pnpm db:seed &&
+      if [ -n "$SEED_ADMIN_EMAIL" ]; then pnpm --filter @mams/api seed:admin; fi
+    startCommand: pnpm --filter @mams/api start
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      # DATABASE_URL: the pooled Neon string, ?sslmode=require included.
+      - key: DATABASE_URL
+        sync: false
+      # Signs session cookies. Rotating it signs everyone out.
+      - key: BETTER_AUTH_SECRET
+        generateValue: true
+      # Guards POST /jobs/tick. The cron job sends it as a bearer token.
+      - key: JOB_TRIGGER_TOKEN
+        generateValue: true
+      # The first admin, created during the build. The password is temporary —
+      # the app forces a change on first login. Clear both once you are in.
+      - key: SEED_ADMIN_EMAIL
+        sync: false
+      - key: SEED_ADMIN_PASSWORD
+        sync: false
+      - key: SEED_ADMIN_NAME
+        sync: false
+      - key: TZ_BUSINESS
+        value: Africa/Cairo
+      # BETTER_AUTH_URL is deliberately absent: apps/api/src/env.ts falls back to
+      # RENDER_EXTERNAL_URL, which Render sets to this service's own https URL.

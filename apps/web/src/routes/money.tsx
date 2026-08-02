@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState, ErrorBanner, SkeletonRows } from "@/components/ui/feedback";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Field, Input, Select } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page";
 import { todayISO } from "@/lib/dates";
 import { useTRPC } from "@/lib/trpc";
@@ -36,19 +36,28 @@ export function MoneyPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="settle space-y-6">
       <PageHeader
+        eyebrow="The books"
         title="Money"
-        subtitle="Requests, budgets, and where it all goes"
+        subtitle="What came in, what went out, and what's still waiting on you"
         actions={
-          <div className="flex items-center rounded-lg border border-gray-300 bg-white">
-            <button onClick={() => shift(-1)} className="flex size-9 items-center justify-center rounded-l-lg text-gray-500 hover:bg-gray-50">
+          <div className="flex items-center overflow-hidden rounded-field border border-rule bg-surface">
+            <button
+              aria-label="Previous month"
+              onClick={() => shift(-1)}
+              className="flex size-9 items-center justify-center text-ink-400 transition-colors hover:bg-ink-50 hover:text-ink-900"
+            >
               <ChevronLeft size={17} />
             </button>
-            <span className="border-x border-gray-200 px-3 text-sm font-medium text-gray-700">
+            <span className="display border-x border-rule px-3.5 text-small leading-9 text-ink-800">
               {monthLabel}
             </span>
-            <button onClick={() => shift(1)} className="flex size-9 items-center justify-center rounded-r-lg text-gray-500 hover:bg-gray-50">
+            <button
+              aria-label="Next month"
+              onClick={() => shift(1)}
+              className="flex size-9 items-center justify-center text-ink-400 transition-colors hover:bg-ink-50 hover:text-ink-900"
+            >
               <ChevronRight size={17} />
             </button>
           </div>
@@ -62,46 +71,49 @@ export function MoneyPage() {
           <SkeletonRows rows={4} />
         </Card>
       ) : overview.isError ? (
-        <ErrorBanner message="Couldn't load the overview." onRetry={() => overview.refetch()} />
+        <ErrorBanner message="The overview didn't load." onRetry={() => overview.refetch()} />
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <StatTile label={`Income · ${monthLabel}`} value={formatMoney(overview.data.totalIncome)} />
+            <StatTile label="Income" value={formatMoney(overview.data.totalIncome)} />
             <StatTile label="Spend" value={formatMoney(overview.data.totalSpend)} />
-            <StatTile label="Overhead (salaries etc.)" value={formatMoney(overview.data.overheadSpend)} />
+            <StatTile label="Overhead" value={formatMoney(overview.data.overheadSpend)} />
             <StatTile
               label="Net"
               value={formatMoney(overview.data.totalIncome - overview.data.totalSpend)}
               tone={
-                overview.data.totalIncome - overview.data.totalSpend >= 0
-                  ? "text-status-done"
-                  : "text-status-overdue"
+                overview.data.totalIncome - overview.data.totalSpend >= 0 ? "done" : "late"
               }
             />
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-2">
+          {/* items-start: a short card must not stretch to match a long one */}
+          <div className="grid items-start gap-6 lg:grid-cols-2">
             <Card>
               <CardHeader>
-                <CardTitle>Spend by category · {monthLabel}</CardTitle>
+                <CardTitle>Spend by category</CardTitle>
+                <span className="ml-auto text-small text-ink-400">{monthLabel}</span>
               </CardHeader>
               {overview.data.spendByCategory.length === 0 ? (
-                <EmptyState title="No approved spend this month" />
+                <EmptyState
+                  title="No approved spend this month"
+                  hint="Approved claims and recurring costs both show up here."
+                />
               ) : (
-                <CardBody className="space-y-3">
+                <CardBody className="space-y-3.5">
                   {overview.data.spendByCategory.map((c) => {
                     const max = overview.data.spendByCategory[0]!.total;
                     return (
                       <div key={c.name}>
-                        <div className="flex justify-between text-sm">
-                          <span className="text-gray-700">{c.name}</span>
-                          <span className="font-medium tabular-nums text-gray-900">
+                        <div className="flex justify-between gap-3">
+                          <span className="text-base text-ink-700">{c.name}</span>
+                          <span className="font-mono text-small font-medium tabular-nums text-ink-900">
                             {formatMoney(c.total)}
                           </span>
                         </div>
-                        <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
+                        <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-ink-100">
                           <div
-                            className="h-full rounded-full bg-accent-500"
+                            className="h-full rounded-full bg-ink-700"
                             style={{ width: `${Math.max(4, Math.round((c.total / max) * 100))}%` }}
                           />
                         </div>
@@ -114,29 +126,30 @@ export function MoneyPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Project budgets (active)</CardTitle>
+                <CardTitle>Project budgets</CardTitle>
+                <span className="ml-auto text-small text-ink-400">Active</span>
               </CardHeader>
               {overview.data.projects.length === 0 ? (
-                <EmptyState title="No active projects" />
+                <EmptyState title="No active projects" hint="Budgets appear once a project runs." />
               ) : (
-                <ul className="divide-y divide-gray-50">
+                <ul className="divide-y divide-rule-soft">
                   {overview.data.projects.map((p) => (
-                    <li key={p.id} className="px-5 py-3">
-                      <div className="flex justify-between text-sm">
-                        <span className="font-medium text-gray-800">
-                          {p.title} <span className="text-gray-400">· {p.clientName}</span>
+                    <li key={p.id} className="px-5 py-3.5">
+                      <div className="flex justify-between gap-3">
+                        <span className="min-w-0 truncate text-base text-ink-800">
+                          {p.title} <span className="text-ink-400">· {p.clientName}</span>
                         </span>
-                        <span className="tabular-nums text-gray-600">
+                        <span className="shrink-0 font-mono text-small tabular-nums text-ink-600">
                           {formatMoney(p.spent)}
                           {p.budget ? ` / ${formatMoney(p.budget)}` : ""}
                         </span>
                       </div>
                       {p.budget ? (
-                        <div className="mt-1.5">
+                        <div className="mt-2">
                           <BudgetBar spent={p.spent} budget={p.budget} />
                         </div>
                       ) : (
-                        <p className="mt-1 text-xs text-gray-400">No budget set</p>
+                        <p className="mt-1 text-small text-ink-400">No budget set</p>
                       )}
                     </li>
                   ))}
@@ -159,7 +172,7 @@ function PendingRequestsCard() {
   const decide = useMutation(
     trpc.finance.decide.mutationOptions({
       onSuccess: (_, vars) => {
-        toast.success(vars.approve ? "Approved ✓" : "Rejected");
+        toast.success(vars.approve ? "Approved" : "Rejected");
         queryClient.invalidateQueries({ queryKey: trpc.finance.pathKey() });
       },
       onError: (err) => toast.error(err.message),
@@ -170,30 +183,39 @@ function PendingRequestsCard() {
   if (pending.data.length === 0) return null;
 
   return (
-    <Card className="border-amber-200">
+    <Card edge="now">
       <CardHeader>
-        <CardTitle>
-          Requests waiting for you <Badge tone="amber">{pending.data.length}</Badge>
-        </CardTitle>
+        <CardTitle>Waiting on you</CardTitle>
+        <Badge tone="now" className="ml-auto">
+          {pending.data.length}
+        </Badge>
       </CardHeader>
-      <ul className="divide-y divide-gray-50">
+      <ul className="divide-y divide-rule-soft">
         {pending.data.map((req) => (
-          <li key={req.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
+          <li key={req.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
             <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="font-semibold tabular-nums text-gray-900">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-mono text-lead font-medium tabular-nums text-ink-900">
                   {formatMoney(req.amount)}
                 </span>
-                <span className="text-sm text-gray-600">{req.note}</span>
+                <span className="text-base text-ink-700">{req.note}</span>
                 {req.receiptLink && (
-                  <a href={req.receiptLink} target="_blank" rel="noreferrer" className="text-accent-600">
+                  <a
+                    href={req.receiptLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label="Open receipt"
+                    className="text-ink-400 transition-colors hover:text-ink-900"
+                  >
                     <ExternalLink size={13} />
                   </a>
                 )}
               </div>
-              <p className="text-xs text-gray-400">
+              <p className="mt-0.5 text-small text-ink-400">
                 {req.requesterName} · {req.categoryName}
-                {req.projectTitle ? ` · ${req.projectTitle}` : " · General"} · {req.spentOn}
+                {req.projectTitle ? ` · ${req.projectTitle}` : " · General"}
+                {" · "}
+                <span className="font-mono">{req.spentOn}</span>
               </p>
             </div>
             <div className="flex shrink-0 gap-2">
@@ -209,7 +231,8 @@ function PendingRequestsCard() {
                 size="sm"
                 disabled={decide.isPending}
                 onClick={() => {
-                  const note = window.prompt("Why reject? (optional, the member sees this)") ?? undefined;
+                  const note =
+                    window.prompt("Why reject? The person who claimed it sees this.") ?? undefined;
                   decide.mutate({ id: req.id, approve: false, note });
                 }}
               >
@@ -240,7 +263,7 @@ function RecurringCard() {
   const create = useMutation(
     trpc.finance.recurring.create.mutationOptions({
       onSuccess: () => {
-        toast.success("Recurring item saved — it posts automatically every month.");
+        toast.success("Saved — it posts itself every month.");
         setAdding(false);
         setName("");
         setAmount("");
@@ -250,31 +273,28 @@ function RecurringCard() {
       onError: (err) => toast.error(err.message),
     }),
   );
-  const update = useMutation(
-    trpc.finance.recurring.update.mutationOptions({ onSuccess: invalidate }),
-  );
+  const update = useMutation(trpc.finance.recurring.update.mutationOptions({ onSuccess: invalidate }));
 
   const memberName = users.data?.find((u) => u.id === userId)?.name;
 
   return (
     <Card>
-      <CardHeader className="flex items-center justify-between">
-        <div>
-          <CardTitle>Recurring · salaries, rent, subscriptions</CardTitle>
-          <p className="mt-0.5 text-sm text-gray-500">
-            Posted automatically as approved overhead on the chosen day, every month.
+      <CardHeader>
+        <div className="min-w-0">
+          <CardTitle>Recurring</CardTitle>
+          <p className="mt-0.5 text-small text-ink-400">
+            Salaries, rent, subscriptions — posted as approved overhead on the chosen day.
           </p>
         </div>
-        <Button variant="secondary" size="sm" onClick={() => setAdding((v) => !v)}>
+        <Button variant="secondary" size="sm" className="ml-auto" onClick={() => setAdding((v) => !v)}>
           <Plus size={15} /> Add
         </Button>
       </CardHeader>
 
       {adding && (
-        <CardBody className="border-b border-gray-100 bg-slate-50/50">
+        <CardBody className="border-b border-rule-soft bg-paper/60">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            <div>
-              <Label htmlFor="rec-member">Salary for (optional)</Label>
+            <Field label="Salary for (optional)" htmlFor="rec-member">
               <Select
                 id="rec-member"
                 value={userId}
@@ -293,22 +313,26 @@ function RecurringCard() {
                     </option>
                   ))}
               </Select>
-            </div>
-            <div>
-              <Label htmlFor="rec-name">Name</Label>
+            </Field>
+            <Field label="Name" htmlFor="rec-name">
               <Input
                 id="rec-name"
-                placeholder='e.g. "Office rent"'
+                placeholder="Office rent"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
               />
-            </div>
-            <div>
-              <Label htmlFor="rec-amount">Amount (EGP)</Label>
-              <Input id="rec-amount" type="number" min={0} value={amount} onChange={(e) => setAmount(e.target.value)} />
-            </div>
-            <div>
-              <Label htmlFor="rec-cat">Category</Label>
+            </Field>
+            <Field label="Amount (EGP)" htmlFor="rec-amount">
+              <Input
+                id="rec-amount"
+                type="number"
+                min={0}
+                className="font-mono"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+              />
+            </Field>
+            <Field label="Category" htmlFor="rec-cat">
               <Select id="rec-cat" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
                 <option value="">Choose…</option>
                 {categories.data?.map((c) => (
@@ -317,20 +341,20 @@ function RecurringCard() {
                   </option>
                 ))}
               </Select>
-            </div>
-            <div>
-              <Label htmlFor="rec-day">Day of month</Label>
+            </Field>
+            <Field label="Day of month" htmlFor="rec-day">
               <Input
                 id="rec-day"
                 type="number"
                 min={1}
                 max={28}
+                className="font-mono"
                 value={day}
                 onChange={(e) => setDay(Number(e.target.value))}
               />
-            </div>
+            </Field>
           </div>
-          <div className="mt-3">
+          <div className="mt-4">
             <Button
               size="sm"
               disabled={create.isPending || !name.trim() || !amount || !categoryId}
@@ -354,29 +378,33 @@ function RecurringCard() {
         <SkeletonRows rows={2} />
       ) : recurring.isError ? (
         <CardBody>
-          <ErrorBanner message="Couldn't load recurring items." />
+          <ErrorBanner message="Recurring items didn't load." />
         </CardBody>
       ) : recurring.data.length === 0 ? (
         <EmptyState
           title="Nothing recurring yet"
-          hint="Add salaries and monthly costs so they post themselves."
+          hint="Add salaries and monthly costs once, and they post themselves from then on."
         />
       ) : (
-        <ul className="divide-y divide-gray-50">
+        <ul className="divide-y divide-rule-soft">
           {recurring.data.map((item) => (
-            <li key={item.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
-              <div>
+            <li
+              key={item.id}
+              className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5"
+            >
+              <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <p className="text-sm font-medium text-gray-800">{item.name}</p>
-                  {!item.active && <Badge tone="red">Paused</Badge>}
+                  <p className="text-base font-medium text-ink-800">{item.name}</p>
+                  {!item.active && <Badge tone="neutral">Paused</Badge>}
                 </div>
-                <p className="text-xs text-gray-400">
-                  {item.categoryName} · day {item.dayOfMonth} of each month
+                <p className="text-small text-ink-400">
+                  {item.categoryName} · day <span className="font-mono">{item.dayOfMonth}</span> of
+                  each month
                   {item.lastPostedPeriod ? ` · last posted ${item.lastPostedPeriod}` : ""}
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-3">
-                <span className="font-semibold tabular-nums text-gray-900">
+                <span className="font-mono text-base font-medium tabular-nums text-ink-900">
                   {formatMoney(item.amount)}
                 </span>
                 <Button

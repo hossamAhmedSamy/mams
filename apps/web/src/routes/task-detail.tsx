@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState, ErrorBanner, SkeletonRows } from "@/components/ui/feedback";
-import { Input, Label, Textarea } from "@/components/ui/input";
+import { Field, Input, Textarea } from "@/components/ui/input";
 import { AvatarStack, PageHeader } from "@/components/ui/page";
 import { PeoplePicker } from "@/components/people-picker";
 import { TaskActionButton } from "@/components/task-action";
@@ -15,6 +15,7 @@ import { DeadlineChip, StatusBadge } from "@/components/task-bits";
 import { formatShort } from "@/lib/dates";
 import { useMe, type Viewer } from "@/lib/session";
 import { useTRPC } from "@/lib/trpc";
+import { cn } from "@/lib/utils";
 import { ActivityList } from "./project-detail";
 
 export function TaskDetailPage() {
@@ -37,7 +38,7 @@ export function TaskDetailPage() {
       </Card>
     );
   if (task.isError)
-    return <ErrorBanner message="Couldn't load this task." onRetry={() => task.refetch()} />;
+    return <ErrorBanner message="This task didn't load." onRetry={() => task.refetch()} />;
 
   const t = task.data;
   const viewer = me.data as Viewer;
@@ -48,16 +49,17 @@ export function TaskDetailPage() {
   const onTask = t.assigneeIds.includes(viewer.id);
 
   return (
-    <div className="space-y-6">
+    <div className="settle">
       <PageHeader
         backTo={`/projects/${t.projectId}`}
         backLabel={t.projectTitle}
+        eyebrow={`${t.projectTitle} · ${t.clientName}`}
         title={label}
-        subtitle={`${t.projectTitle} · ${t.clientName}`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={t.status as never} />
-            <DeadlineChip deadline={t.deadline} />
+            {/* a finished task's deadline is history — it must not still read as late */}
+            <DeadlineChip deadline={t.deadline} muted={t.status === "done"} />
             <TaskActionButton
               task={{
                 id: t.id,
@@ -86,7 +88,10 @@ export function TaskDetailPage() {
                 onClick={() =>
                   transition.mutate(
                     { id: t.id, to: "in_progress" },
-                    { onSuccess: () => toast.info("Reopened — the next stage was adjusted if needed.") },
+                    {
+                      onSuccess: () =>
+                        toast.info("Reopened — the next stage was adjusted if needed."),
+                    },
                   )
                 }
               >
@@ -98,16 +103,16 @@ export function TaskDetailPage() {
       />
 
       {t.flagged && (
-        <div className="flex items-start gap-2 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3">
-          <Flag size={16} className="mt-0.5 shrink-0 text-orange-600" />
+        <div className="mb-6 flex items-start gap-3 rounded-card border border-late/25 border-l-[3px] border-l-late bg-late-tint px-4 py-3.5">
+          <Flag size={15} className="mt-0.5 shrink-0 text-late" />
           <div>
-            <p className="text-sm font-medium text-orange-800">Needs attention</p>
-            {t.flagNote && <p className="text-sm text-orange-700">{t.flagNote}</p>}
+            <p className="eyebrow text-late">Needs attention</p>
+            {t.flagNote && <p className="mt-1 text-base text-late-ink">{t.flagNote}</p>}
           </div>
         </div>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-6 lg:grid-cols-3 lg:gap-8">
         <div className="space-y-6 lg:col-span-2">
           {t.details && (
             <Card>
@@ -115,7 +120,9 @@ export function TaskDetailPage() {
                 <CardTitle>Details</CardTitle>
               </CardHeader>
               <CardBody>
-                <p className="whitespace-pre-wrap text-sm text-gray-700">{t.details}</p>
+                <p className="whitespace-pre-wrap text-base leading-relaxed text-ink-700">
+                  {t.details}
+                </p>
               </CardBody>
             </Card>
           )}
@@ -125,40 +132,35 @@ export function TaskDetailPage() {
 
         <div className="space-y-6">
           {(canManage || canAssign) && (
-            <ManageCard
-              task={t}
-              canManage={canManage}
-              canAssign={canAssign}
-              onChanged={invalidate}
-            />
+            <ManageCard task={t} canManage={canManage} canAssign={canAssign} onChanged={invalidate} />
           )}
           <Card>
             <CardHeader>
-              <CardTitle>Info</CardTitle>
+              <CardTitle>At a glance</CardTitle>
             </CardHeader>
-            <CardBody className="space-y-2.5 text-sm">
+            <CardBody className="space-y-3">
               <div className="flex items-center justify-between gap-3">
-                <span className="text-gray-500">On this task</span>
+                <span className="eyebrow text-ink-400">On this task</span>
                 {t.assignees.length > 0 ? (
                   <AvatarStack names={t.assignees.map((a) => a.name)} />
                 ) : (
-                  <span className="font-medium text-gray-400">Nobody yet</span>
+                  <span className="text-base text-ink-400">Nobody yet</span>
                 )}
               </div>
               {t.assignees.length > 0 && (
-                <p className="text-right text-xs text-gray-500">
+                <p className="text-right text-small text-ink-500">
                   {t.assignees.map((a) => a.name).join(", ")}
                 </p>
               )}
               <InfoRow label="Stage" value={t.stageName ?? "No stage"} />
-              <InfoRow label="Starts" value={t.startDate ? formatShort(t.startDate) : "—"} />
-              <InfoRow label="Deadline" value={t.deadline ? formatShort(t.deadline) : "—"} />
+              <InfoRow label="Starts" value={t.startDate ? formatShort(t.startDate) : "——"} mono />
+              <InfoRow label="Due" value={t.deadline ? formatShort(t.deadline) : "——"} mono />
               {t.driveLink && (
                 <a
                   href={t.driveLink}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-accent-600 hover:underline"
+                  className="inline-flex items-center gap-1.5 text-small font-medium text-ink-600 transition-colors hover:text-ink-950"
                 >
                   Open in Drive <ExternalLink size={13} />
                 </a>
@@ -172,11 +174,13 @@ export function TaskDetailPage() {
   );
 }
 
-function InfoRow({ label, value }: { label: string; value: string }) {
+function InfoRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div className="flex justify-between gap-3">
-      <span className="text-gray-500">{label}</span>
-      <span className="font-medium text-gray-800">{value}</span>
+    <div className="flex items-baseline justify-between gap-3 border-t border-rule-soft pt-3">
+      <span className="eyebrow text-ink-400">{label}</span>
+      <span className={cn("text-base text-ink-800", mono && "font-mono text-small tabular-nums")}>
+        {value}
+      </span>
     </div>
   );
 }
@@ -199,49 +203,58 @@ function ChecklistCard({
   );
 
   if (items.length === 0 && !canEdit) return null;
+  const doneCount = items.filter((i) => i.done).length;
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>
-          Checklist{" "}
-          {items.length > 0 && (
-            <span className="font-normal text-gray-400">
-              {items.filter((i) => i.done).length}/{items.length}
-            </span>
-          )}
-        </CardTitle>
+        <CardTitle>Checklist</CardTitle>
+        {items.length > 0 && (
+          <span className="ml-auto font-mono text-small tabular-nums text-ink-400">
+            {doneCount}/{items.length}
+          </span>
+        )}
       </CardHeader>
-      <CardBody className="space-y-2">
+      <CardBody className="space-y-1">
         {items.map((item, idx) => (
-          <label key={idx} className="flex items-center gap-2 text-sm">
+          <label
+            key={idx}
+            className="flex cursor-pointer items-center gap-2.5 rounded-[8px] px-1 py-1.5 transition-colors hover:bg-ink-50"
+          >
             <input
               type="checkbox"
               checked={item.done}
               disabled={!canEdit || save.isPending}
               onChange={(e) => {
-                const next = items.map((it, i) => (i === idx ? { ...it, done: e.target.checked } : it));
+                const next = items.map((it, i) =>
+                  i === idx ? { ...it, done: e.target.checked } : it,
+                );
                 save.mutate({ id: task.id, checklist: next });
               }}
-              className="size-4 accent-accent-600"
+              className="size-4.5 shrink-0 rounded-[5px] border-rule accent-ink-900"
             />
-            <span className={item.done ? "text-gray-400 line-through" : "text-gray-700"}>
+            <span
+              className={cn("text-base", item.done ? "text-ink-300 line-through" : "text-ink-700")}
+            >
               {item.text}
             </span>
           </label>
         ))}
         {canEdit && (
           <form
-            className="flex gap-2 pt-1"
+            className="flex gap-2 pt-2"
             onSubmit={(e) => {
               e.preventDefault();
               if (!newItem.trim()) return;
-              save.mutate({ id: task.id, checklist: [...items, { text: newItem.trim(), done: false }] });
+              save.mutate({
+                id: task.id,
+                checklist: [...items, { text: newItem.trim(), done: false }],
+              });
               setNewItem("");
             }}
           >
             <Input
-              placeholder="Add item (e.g. reel 4)"
+              placeholder="Add an item — “reel 4”"
               value={newItem}
               onChange={(e) => setNewItem(e.target.value)}
             />
@@ -274,29 +287,33 @@ function CommentsCard({ taskId }: { taskId: string }) {
       <CardHeader>
         <CardTitle>Comments</CardTitle>
       </CardHeader>
-      <CardBody className="space-y-3">
+      <CardBody className="space-y-4">
         {comments.isPending ? (
           <SkeletonRows rows={2} />
         ) : comments.isError ? (
-          <ErrorBanner message="Couldn't load comments." />
+          <ErrorBanner message="Comments didn't load." />
         ) : comments.data.length === 0 ? (
-          <EmptyState title="No comments yet" />
+          <EmptyState
+            className="py-6"
+            title="No comments yet"
+            hint="Anything the next person needs to know goes here."
+          />
         ) : (
           <ul className="space-y-3">
             {comments.data.map((c) => (
-              <li key={c.id} className="rounded-xl bg-canvas px-3 py-2">
+              <li key={c.id} className="rounded-card border border-rule-soft bg-paper/60 px-3.5 py-2.5">
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-sm font-medium text-gray-800">{c.authorName}</span>
-                  <span className="text-xs text-gray-400">
+                  <span className="text-base font-medium text-ink-900">{c.authorName}</span>
+                  <span className="font-mono text-small tabular-nums text-ink-300">
                     {new Date(c.createdAt).toLocaleString("en-GB", {
-                      day: "numeric",
+                      day: "2-digit",
                       month: "short",
                       hour: "2-digit",
                       minute: "2-digit",
                     })}
                   </span>
                 </div>
-                <p className="mt-0.5 whitespace-pre-wrap text-sm text-gray-700">{c.body}</p>
+                <p className="mt-1 whitespace-pre-wrap text-base text-ink-700">{c.body}</p>
               </li>
             ))}
           </ul>
@@ -316,7 +333,7 @@ function CommentsCard({ taskId }: { taskId: string }) {
           />
           <div>
             <Button type="submit" size="sm" disabled={create.isPending || !body.trim()}>
-              Comment
+              Post comment
             </Button>
           </div>
         </form>
@@ -365,22 +382,20 @@ function ManageCard({
       <CardHeader>
         <CardTitle>Manage</CardTitle>
       </CardHeader>
-      <CardBody className="space-y-4">
+      <CardBody className="space-y-5">
         {canAssign && (
-          <div>
-            <Label>People on this task</Label>
+          <Field label="People on this task">
             <PeoplePicker
               selected={task.assigneeIds}
               disabled={setAssignees.isPending}
               onChange={(userIds) => setAssignees.mutate({ id: task.id, userIds })}
             />
-          </div>
+          </Field>
         )}
         {canManage && (
           <>
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label htmlFor="t-start">Start date</Label>
+              <Field label="Starts" htmlFor="t-start">
                 <Input
                   id="t-start"
                   type="date"
@@ -391,9 +406,8 @@ function ManageCard({
                     setSchedule.mutate({ id: task.id, startDate: e.target.value || null })
                   }
                 />
-              </div>
-              <div>
-                <Label htmlFor="t-deadline">Deadline</Label>
+              </Field>
+              <Field label="Due" htmlFor="t-deadline">
                 <Input
                   id="t-deadline"
                   type="date"
@@ -404,10 +418,9 @@ function ManageCard({
                     setSchedule.mutate({ id: task.id, deadline: e.target.value || null })
                   }
                 />
-              </div>
+              </Field>
             </div>
-            <div>
-              <Label htmlFor="t-drive">Drive link</Label>
+            <Field label="Drive link" htmlFor="t-drive">
               <div className="flex gap-2">
                 <Input
                   id="t-drive"
@@ -425,8 +438,8 @@ function ManageCard({
                   Save
                 </Button>
               </div>
-            </div>
-            <div className="border-t border-hairline pt-3">
+            </Field>
+            <div className="border-t border-rule-soft pt-4">
               {task.flagged ? (
                 <Button
                   variant="secondary"
@@ -439,7 +452,7 @@ function ManageCard({
               ) : (
                 <div className="space-y-2">
                   <Input
-                    placeholder="Flag note (optional)"
+                    placeholder="What's blocking it? (optional)"
                     value={flagNote}
                     onChange={(e) => setFlagNote(e.target.value)}
                   />

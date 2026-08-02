@@ -1,6 +1,6 @@
 import { can, taskLabel } from "@mams/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ExternalLink, Flag, Lock, Plus, UserPlus } from "lucide-react";
+import { ExternalLink, Flag, Lock, Plus, UserPlus } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
@@ -8,11 +8,19 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
 import { EmptyState, ErrorBanner, SkeletonRows } from "@/components/ui/feedback";
-import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { AvatarStack, PageHeader } from "@/components/ui/page";
+import { Field, Input, Select, Textarea } from "@/components/ui/input";
+import { AvatarStack, PageHeader, SectionLabel } from "@/components/ui/page";
+import { RailNode } from "@/components/handoff-rail";
 import { PeoplePicker } from "@/components/people-picker";
 import { TaskActionButton } from "@/components/task-action";
-import { DeadlineChip, PriorityDot, ScheduleLine, StatusBadge, type Viewer } from "@/components/task-bits";
+import {
+  DeadlineChip,
+  PriorityDot,
+  ScheduleLine,
+  StatusBadge,
+  timeTone,
+  type Viewer,
+} from "@/components/task-bits";
 import { todayISO } from "@/lib/dates";
 import { useMe } from "@/lib/session";
 import { useTRPC } from "@/lib/trpc";
@@ -57,7 +65,7 @@ export function ProjectDetailPage() {
       </Card>
     );
   if (project.isError)
-    return <ErrorBanner message="Couldn't load this project." onRetry={() => project.refetch()} />;
+    return <ErrorBanner message="This project didn't load." onRetry={() => project.refetch()} />;
 
   const p = project.data;
   const viewer = me.data as Viewer;
@@ -75,56 +83,58 @@ export function ProjectDetailPage() {
   ];
 
   return (
-    <div className="space-y-6">
-      <div>
-        <PageHeader
-          backTo="/board"
-          backLabel="Projects"
-          title={p.title}
-          subtitle={`${p.clientName}${p.campaign ? ` · ${p.campaign}` : ""}`}
-          actions={
-            <div className="flex items-center gap-3">
-              <PriorityDot priority={p.priority as "high" | "medium" | "low"} />
-              {p.driveLink && (
-                <a
-                  href={p.driveLink}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-sm text-accent-600 hover:underline"
-                >
-                  Drive <ExternalLink size={13} />
-                </a>
-              )}
-              {canManageProject ? (
-                <Select
-                  className="w-36"
-                  value={p.status}
-                  onChange={(e) => setStatus.mutate({ id: p.id, status: e.target.value as never })}
-                >
-                  <option value="active">Active</option>
-                  <option value="on_hold">On hold</option>
-                  <option value="completed">Completed</option>
-                  <option value="archived">Archived</option>
-                </Select>
-              ) : (
-                <Badge tone={p.status === "completed" ? "green" : "accent"}>{p.status}</Badge>
-              )}
-            </div>
-          }
-        />
-        {p.notes && <p className="-mt-3 max-w-2xl text-sm text-gray-600">{p.notes}</p>}
-      </div>
+    <div className="settle">
+      <PageHeader
+        backTo="/board"
+        backLabel="Projects"
+        eyebrow={`${p.clientName}${p.campaign ? ` · ${p.campaign}` : ""}`}
+        title={p.title}
+        actions={
+          <div className="flex flex-wrap items-center gap-3">
+            <PriorityDot priority={p.priority as "high" | "medium" | "low"} />
+            {p.driveLink && (
+              <a
+                href={p.driveLink}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 text-small font-medium text-ink-500 transition-colors hover:text-ink-900"
+              >
+                Drive <ExternalLink size={13} />
+              </a>
+            )}
+            {canManageProject ? (
+              <Select
+                className="w-36"
+                aria-label="Project status"
+                value={p.status}
+                onChange={(e) => setStatus.mutate({ id: p.id, status: e.target.value as never })}
+              >
+                <option value="active">Active</option>
+                <option value="on_hold">On hold</option>
+                <option value="completed">Completed</option>
+                <option value="archived">Archived</option>
+              </Select>
+            ) : (
+              <Badge tone={p.status === "completed" ? "done" : "ink"}>
+                {p.status.replace("_", " ")}
+              </Badge>
+            )}
+          </div>
+        }
+      />
 
-      <div className="flex gap-1 border-b border-hairline">
+      {p.notes && <p className="-mt-2 mb-6 max-w-2xl text-base text-ink-600">{p.notes}</p>}
+
+      <div className="mb-7 flex gap-1 border-b border-rule">
         {tabs.map((t) => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
             className={cn(
-              "border-b-2 px-4 py-2.5 text-sm font-medium",
+              "-mb-px border-b-2 px-4 py-2.5 text-base transition-colors",
               tab === t.key
-                ? "border-accent-600 text-accent-700"
-                : "border-transparent text-gray-500 hover:text-gray-700",
+                ? "border-ink-900 font-medium text-ink-900"
+                : "border-transparent text-ink-400 hover:text-ink-700",
             )}
           >
             {t.label}
@@ -133,35 +143,36 @@ export function ProjectDetailPage() {
       </div>
 
       {tab === "work" && (
-        <div className="space-y-8">
+        <div className="space-y-10">
           {chain.length > 0 ? (
             <section>
-              <div className="mb-3 flex items-baseline justify-between">
-                <h2 className="text-sm font-semibold text-gray-700">The flow</h2>
-                <span className="text-xs text-gray-400">
-                  {doneCount}/{chain.length} stages done
-                </span>
-              </div>
+              <SectionLabel className="mb-5" action={<Progress done={doneCount} total={chain.length} />}>
+                The flow
+              </SectionLabel>
               <Pipeline chain={chain} viewer={viewer} />
             </section>
           ) : (
             <Card>
               <EmptyState
-                title="No flow on this project"
-                hint="Tasks are added by hand — see below."
+                title="This project has no flow"
+                hint="It runs on tasks added by hand instead — they're listed below."
               />
             </Card>
           )}
 
           <section>
-            <div className="mb-3 flex items-baseline justify-between">
-              <h2 className="text-sm font-semibold text-gray-700">Extra tasks</h2>
-              {canManageTasks && (
-                <Button variant="secondary" size="sm" onClick={() => setAdding((v) => !v)}>
-                  <Plus size={14} /> Add task
-                </Button>
-              )}
-            </div>
+            <SectionLabel
+              className="mb-4"
+              action={
+                canManageTasks && (
+                  <Button variant="secondary" size="sm" onClick={() => setAdding((v) => !v)}>
+                    <Plus size={14} /> Add task
+                  </Button>
+                )
+              }
+            >
+              Extra tasks
+            </SectionLabel>
             {adding && (
               <div className="mb-3">
                 <AddTaskCard projectId={p.id} onDone={() => setAdding(false)} />
@@ -177,8 +188,8 @@ export function ProjectDetailPage() {
               !adding && (
                 <Card>
                   <EmptyState
-                    title="No extra tasks"
-                    hint="Anything outside the flow — a re-shoot, a fix — goes here."
+                    title="Nothing outside the flow"
+                    hint="A re-shoot, a fix, a favour — anything that isn't a stage lives here."
                   />
                 </Card>
               )
@@ -193,9 +204,18 @@ export function ProjectDetailPage() {
   );
 }
 
+function Progress({ done, total }: { done: number; total: number }) {
+  return (
+    <span className="font-mono text-small tabular-nums text-ink-400">
+      {done}/{total} stages
+    </span>
+  );
+}
+
 // ---------------------------------------------------------------------------
-// The pipeline: vertical, phone-first, plain language. The current stage is
-// the big card; done stages collapse; future stages explain when they start.
+// The pipeline: vertical, phone-first, plain language. The rail down the left
+// is made of the people holding each stage rather than step numbers, so the
+// question the team actually asks — "who has it?" — is answered by looking.
 // ---------------------------------------------------------------------------
 
 function Pipeline({ chain, viewer }: { chain: ProjectTask[]; viewer: Viewer }) {
@@ -207,55 +227,39 @@ function Pipeline({ chain, viewer }: { chain: ProjectTask[]; viewer: Viewer }) {
         const isCurrent = i === currentIdx;
         const isLast = i === chain.length - 1;
         const previous = chain[i - 1] ? taskLabel(chain[i - 1]!.stageName) : "the previous stage";
-        return (
-          <li key={task.id} className="relative flex gap-3 sm:gap-4">
-            {/* rail */}
-            <div className="flex w-8 flex-col items-center">
-              <span
-                className={cn(
-                  "z-10 flex size-8 shrink-0 items-center justify-center rounded-full border-2 text-xs font-bold",
-                  isDone
-                    ? "border-status-done bg-status-done text-white"
-                    : isCurrent
-                      ? "border-accent-600 bg-white text-accent-700 ring-4 ring-accent-100"
-                      : "border-gray-200 bg-white text-gray-300",
-                )}
-              >
-                {isDone ? <Check size={15} strokeWidth={3} /> : i + 1}
-              </span>
-              {!isLast && (
-                <span
-                  className={cn("w-0.5 flex-1", isDone ? "bg-status-done/40" : "bg-gray-200")}
-                />
-              )}
-            </div>
+        const names = task.assignees.map((a) => a.name);
 
-            {/* card */}
-            <div className={cn("min-w-0 flex-1", isLast ? "pb-0" : "pb-3")}>
+        return (
+          <li key={task.id} className="flex gap-3 sm:gap-4">
+            <RailNode
+              state={isDone ? "done" : isCurrent ? "live" : "ahead"}
+              names={names}
+              flagged={task.flagged}
+              last={isLast}
+            />
+
+            <div className={cn("min-w-0 flex-1", isLast ? "pb-0" : "pb-4")}>
               {isCurrent ? (
                 <CurrentStageCard task={task} viewer={viewer} />
               ) : (
                 <Link
                   to={`/tasks/${task.id}`}
                   className={cn(
-                    "flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-white px-4 py-3 transition-colors hover:border-gray-300",
-                    isDone ? "border-hairline" : "border-hairline opacity-70",
+                    "flex flex-wrap items-center justify-between gap-2 rounded-card border border-rule bg-surface px-4 py-3 transition-colors hover:border-ink-300",
+                    !isDone && "opacity-70",
                   )}
                 >
-                  <div className="flex items-center gap-2">
-                    <span className={cn("font-medium", isDone ? "text-gray-500" : "text-gray-600")}>
+                  <span className="flex items-center gap-2">
+                    <span className={cn("text-base", isDone ? "text-ink-500" : "text-ink-700")}>
                       {taskLabel(task.stageName)}
                     </span>
-                    {task.requiresApproval && <Lock size={12} className="text-amber-500" />}
-                    {task.flagged && <Flag size={12} className="text-status-flagged" />}
-                  </div>
-                  <span className="flex items-center gap-2 text-xs text-gray-400">
-                    {task.assignees.length > 0 && (
-                      <AvatarStack names={task.assignees.map((a) => a.name)} />
-                    )}
+                    {task.requiresApproval && <Lock size={12} className="text-ink-300" />}
+                    {task.flagged && <Flag size={12} className="text-late" />}
+                  </span>
+                  <span className="text-small text-ink-400">
                     {isDone
                       ? "Done"
-                      : task.assignees.length > 0
+                      : names.length > 0
                         ? `starts after ${previous}`
                         : `unassigned · starts after ${previous}`}
                   </span>
@@ -281,58 +285,62 @@ function CurrentStageCard({ task, viewer }: { task: ProjectTask; viewer: Viewer 
     }),
   );
   const checklistDone = task.checklist?.filter((c) => c.done).length ?? 0;
+  const tone = timeTone(task.deadline, undefined, { flagged: task.flagged });
 
   return (
-    <div
-      className={cn(
-        "rounded-xl border-2 bg-white p-4 shadow-card",
-        task.flagged ? "border-orange-300" : "border-accent-200",
-      )}
-    >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <Link to={`/tasks/${task.id}`} className="flex items-center gap-2">
-          <span className="text-base font-semibold text-gray-900">{taskLabel(task.stageName)}</span>
+    <Card edge={tone === "neutral" ? "now" : tone} className="p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <Link to={`/tasks/${task.id}`} className="flex flex-wrap items-center gap-2">
+          <span className="display text-title text-ink-900">{taskLabel(task.stageName)}</span>
           <StatusBadge status={task.status as never} />
         </Link>
         <DeadlineChip deadline={task.deadline} />
       </div>
 
-      <div className="mt-1">
-        <ScheduleLine startDate={task.startDate} deadline={task.deadline} />
-      </div>
+      <ScheduleLine
+        className="mt-1 block"
+        startDate={task.startDate}
+        deadline={task.deadline}
+      />
 
       {task.flagged && (
-        <p className="mt-2 rounded-lg bg-orange-50 px-3 py-1.5 text-xs text-orange-700">
-          ⚑ Needs attention — check the task page
+        <p className="mt-3 rounded-[8px] border-l-2 border-late bg-late-tint px-3 py-2 text-small text-late-ink">
+          Flagged — open the task to see what's blocking it.
         </p>
       )}
 
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           {task.assignees.length > 0 ? (
-            <span className="flex items-center gap-2 text-sm text-gray-700">
+            <span className="flex items-center gap-2 text-base text-ink-700">
               <AvatarStack names={task.assignees.map((a) => a.name)} />
               <span className="truncate">{task.assignees.map((a) => a.name).join(", ")}</span>
             </span>
           ) : (
-            <span className="text-sm text-gray-400">Nobody assigned yet</span>
+            <span className="text-base text-ink-400">Nobody on this yet</span>
           )}
           {canAssign && (
             <button
               type="button"
               onClick={() => setEditingPeople((v) => !v)}
-              className="inline-flex items-center gap-1 text-xs font-medium text-accent-600 hover:text-accent-700"
+              className="inline-flex items-center gap-1 text-small font-medium text-ink-500 transition-colors hover:text-ink-900"
             >
               <UserPlus size={13} /> {editingPeople ? "Done" : "Change"}
             </button>
           )}
           {task.checklist && task.checklist.length > 0 && (
-            <span className="text-xs text-gray-400">
-              ☑ {checklistDone}/{task.checklist.length}
+            <span className="font-mono text-small tabular-nums text-ink-400">
+              {checklistDone}/{task.checklist.length}
             </span>
           )}
           {task.driveLink && (
-            <a href={task.driveLink} target="_blank" rel="noreferrer" className="text-accent-600">
+            <a
+              href={task.driveLink}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Open in Drive"
+              className="text-ink-400 transition-colors hover:text-ink-900"
+            >
               <ExternalLink size={14} />
             </a>
           )}
@@ -352,7 +360,7 @@ function CurrentStageCard({ task, viewer }: { task: ProjectTask; viewer: Viewer 
       </div>
 
       {editingPeople && canAssign && (
-        <div className="mt-3 border-t border-hairline pt-3">
+        <div className="mt-4 border-t border-rule-soft pt-4">
           <PeoplePicker
             selected={task.assigneeIds}
             disabled={setAssignees.isPending}
@@ -360,29 +368,38 @@ function CurrentStageCard({ task, viewer }: { task: ProjectTask; viewer: Viewer 
           />
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
 function AdhocTaskRow({ task, viewer }: { task: ProjectTask; viewer: Viewer }) {
+  const tone = timeTone(task.deadline, undefined, {
+    flagged: task.flagged,
+    done: task.status === "done",
+  });
   return (
-    <Card className={cn("px-4 py-3", task.flagged && "border-orange-300")}>
+    <Card edge={tone === "neutral" ? "none" : tone} className="px-4 py-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Link to={`/tasks/${task.id}`} className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium text-gray-900">{taskLabel(task.stageName)}</span>
-            <StatusBadge status={task.status as never} />
-            {task.flagged && <Badge tone="orange">Flagged</Badge>}
+            <span className="display text-lead text-ink-900">{taskLabel(task.stageName)}</span>
+            {task.flagged ? (
+              <Badge tone="late" filled>
+                <Flag size={9} strokeWidth={3} /> Flagged
+              </Badge>
+            ) : (
+              <StatusBadge status={task.status as never} />
+            )}
           </div>
-          <p className="mt-0.5 text-sm text-gray-500">
+          <p className="mt-0.5 text-small text-ink-400">
             {task.assignees.length > 0
               ? task.assignees.map((a) => a.name).join(", ")
-              : "Nobody assigned"}
+              : "Nobody on this yet"}
           </p>
           <ScheduleLine startDate={task.startDate} deadline={task.deadline} />
         </Link>
         <div className="flex shrink-0 items-center gap-3">
-          <DeadlineChip deadline={task.deadline} />
+          <DeadlineChip deadline={task.deadline} muted={task.status === "done"} />
           <TaskActionButton
             task={{
               id: task.id,
@@ -443,8 +460,7 @@ function AddTaskCard({ projectId, onDone }: { projectId: string; onDone: () => v
             });
           }}
         >
-          <div>
-            <Label htmlFor="at-stage">Kind of work</Label>
+          <Field label="Kind of work" htmlFor="at-stage">
             <Select id="at-stage" value={stageId} onChange={(e) => setStageId(e.target.value)}>
               <option value="">Choose…</option>
               {stages.data
@@ -455,10 +471,9 @@ function AddTaskCard({ projectId, onDone }: { projectId: string; onDone: () => v
                   </option>
                 ))}
             </Select>
-          </div>
+          </Field>
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="at-start">Start date</Label>
+            <Field label="Starts" htmlFor="at-start">
               <Input
                 id="at-start"
                 type="date"
@@ -466,9 +481,8 @@ function AddTaskCard({ projectId, onDone }: { projectId: string; onDone: () => v
                 max={deadline || undefined}
                 onChange={(e) => setStartDate(e.target.value)}
               />
-            </div>
-            <div>
-              <Label htmlFor="at-due">Deadline</Label>
+            </Field>
+            <Field label="Due" htmlFor="at-due">
               <Input
                 id="at-due"
                 type="date"
@@ -476,21 +490,19 @@ function AddTaskCard({ projectId, onDone }: { projectId: string; onDone: () => v
                 min={startDate || undefined}
                 onChange={(e) => setDeadline(e.target.value)}
               />
-            </div>
+            </Field>
           </div>
-          <div className="sm:col-span-2">
-            <Label>Who's on it</Label>
+          <Field label="Who's on it" className="sm:col-span-2">
             <PeoplePicker selected={assigneeIds} onChange={setAssigneeIds} />
-          </div>
-          <div className="sm:col-span-2">
-            <Label htmlFor="at-details">Notes (optional)</Label>
+          </Field>
+          <Field label="Notes (optional)" htmlFor="at-details" className="sm:col-span-2">
             <Textarea
               id="at-details"
               placeholder="Anything the team needs to know"
               value={details}
               onChange={(e) => setDetails(e.target.value)}
             />
-          </div>
+          </Field>
           <div className="flex gap-2 sm:col-span-2">
             <Button type="submit" disabled={create.isPending || !stageId}>
               {create.isPending ? "Adding…" : "Add task"}
@@ -513,7 +525,9 @@ export function ActivityList({
   entityId: string;
 }) {
   const trpc = useTRPC();
-  const activity = useQuery(trpc.activity.forEntity.queryOptions({ entityType, entityId, limit: 50 }));
+  const activity = useQuery(
+    trpc.activity.forEntity.queryOptions({ entityType, entityId, limit: 50 }),
+  );
 
   if (activity.isPending)
     return (
@@ -521,26 +535,29 @@ export function ActivityList({
         <SkeletonRows rows={3} />
       </Card>
     );
-  if (activity.isError) return <ErrorBanner message="Couldn't load activity." />;
+  if (activity.isError) return <ErrorBanner message="Activity didn't load." />;
   if (activity.data.length === 0)
     return (
       <Card>
-        <EmptyState title="No activity yet" />
+        <EmptyState
+          title="Nothing has happened yet"
+          hint="Every assignment, handoff and date change gets written down here."
+        />
       </Card>
     );
 
   return (
     <Card>
-      <ul className="divide-y divide-gray-50">
+      <ul className="divide-y divide-rule-soft">
         {activity.data.map((entry) => (
-          <li key={entry.id} className="flex items-baseline justify-between gap-3 px-4 py-2.5">
-            <span className="text-sm text-gray-700">
-              <span className="font-medium">{entry.actorName ?? "System"}</span>{" "}
+          <li key={entry.id} className="flex items-baseline justify-between gap-4 px-4 py-3">
+            <span className="text-base text-ink-600">
+              <span className="font-medium text-ink-900">{entry.actorName ?? "System"}</span>{" "}
               {describeAction(entry.action, entry.detail as Record<string, unknown> | null)}
             </span>
-            <span className="shrink-0 text-xs text-gray-400">
+            <span className="shrink-0 font-mono text-small tabular-nums text-ink-300">
               {new Date(entry.createdAt).toLocaleString("en-GB", {
-                day: "numeric",
+                day: "2-digit",
                 month: "short",
                 hour: "2-digit",
                 minute: "2-digit",
@@ -596,21 +613,29 @@ function describeAction(action: string, detail: Record<string, unknown> | null):
   }
 }
 
-/** Progress bar used by ledger + money screens. */
+/** Budget spend, used by the ledger + money screens. */
 export function BudgetBar({ spent, budget }: { spent: number; budget: number | null }) {
   if (!budget || budget <= 0) return null;
   const pct = Math.min(100, Math.round((spent / budget) * 100));
   const over = spent > budget;
   return (
     <div className="w-full">
-      <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-ink-100">
         <div
-          className={cn("h-full rounded-full", over ? "bg-status-overdue" : pct > 80 ? "bg-status-due-soon" : "bg-status-done")}
+          className={cn(
+            "h-full rounded-full",
+            over ? "bg-late" : pct > 80 ? "bg-now" : "bg-ink-700",
+          )}
           style={{ width: `${pct}%` }}
         />
       </div>
-      <p className={cn("mt-1 text-xs", over ? "font-medium text-status-overdue" : "text-gray-400")}>
-        {pct}% of budget{over ? " — over!" : ""}
+      <p
+        className={cn(
+          "mt-1.5 font-mono text-small tabular-nums",
+          over ? "font-medium text-late" : "text-ink-400",
+        )}
+      >
+        {pct}% of budget{over ? " — over" : ""}
       </p>
     </div>
   );

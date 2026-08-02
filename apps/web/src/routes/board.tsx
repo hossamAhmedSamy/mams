@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState, ErrorBanner, SkeletonRows } from "@/components/ui/feedback";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Checkbox, Field, Input, Label, Select } from "@/components/ui/input";
 import { PeoplePicker } from "@/components/people-picker";
 import { PriorityDot } from "@/components/task-bits";
 import { AvatarStack, PageHeader } from "@/components/ui/page";
@@ -38,10 +38,11 @@ export function BoardPage() {
   }, [projects.data, clientFilter, statusFilter, lateOnly]);
 
   return (
-    <div className="space-y-6">
+    <div className="settle">
       <PageHeader
+        eyebrow="Every production"
         title="Projects"
-        subtitle="Where everything stands"
+        subtitle="Where each one has got to, and who is holding it"
         actions={
           canCreate && (
             <Button onClick={() => setShowCreate((v) => !v)}>
@@ -51,11 +52,16 @@ export function BoardPage() {
         }
       />
 
-      {showCreate && <CreateProjectCard onDone={() => setShowCreate(false)} />}
+      {showCreate && (
+        <div className="mb-6">
+          <CreateProjectCard onDone={() => setShowCreate(false)} />
+        </div>
+      )}
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <Select
           className="w-44"
+          aria-label="Filter by client"
           value={clientFilter}
           onChange={(e) => setClientFilter(e.target.value)}
         >
@@ -68,6 +74,7 @@ export function BoardPage() {
         </Select>
         <Select
           className="w-40"
+          aria-label="Filter by status"
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
         >
@@ -77,135 +84,175 @@ export function BoardPage() {
           <option value="completed">Completed</option>
           <option value="archived">Archived</option>
         </Select>
-        <label className="flex items-center gap-2 text-sm text-gray-600">
-          <input
-            type="checkbox"
-            checked={lateOnly}
-            onChange={(e) => setLateOnly(e.target.checked)}
-            className="size-4 accent-red-600"
-          />
-          Late only
-        </label>
+        <Checkbox
+          className="ml-1"
+          label="Late only"
+          checked={lateOnly}
+          onChange={(e) => setLateOnly(e.target.checked)}
+        />
       </div>
 
-      <Card>
+      <Card className="overflow-hidden">
         {projects.isPending ? (
           <SkeletonRows rows={5} />
         ) : projects.isError ? (
           <CardBody>
-            <ErrorBanner message="Couldn't load projects." onRetry={() => projects.refetch()} />
+            <ErrorBanner message="Projects didn't load." onRetry={() => projects.refetch()} />
           </CardBody>
         ) : filtered.length === 0 ? (
           <EmptyState
-            title="No projects match"
-            hint={canCreate ? "Create your first project to get the board moving." : "Nothing here yet."}
+            title="Nothing matches those filters"
+            hint={
+              canCreate
+                ? "Clear a filter, or start a project and its stages will appear here."
+                : "Try clearing a filter."
+            }
           />
         ) : (
           <>
-          {/* phone: card list (quick glance on location, mid-work) */}
-          <ul className="divide-y divide-gray-100 sm:hidden">
-            {filtered.map((p) => (
-              <li key={p.id}>
-                <Link
-                  to={`/projects/${p.id}`}
-                  className={cn("block px-4 py-3 active:bg-gray-50", p.isLate && "border-l-[3px] border-red-500")}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium text-gray-900">{p.title}</span>
-                    {p.dueDate && (
-                      <span className={cn("shrink-0 text-xs", p.isLate ? "font-semibold text-red-600" : "text-gray-400")}>
-                        {formatShort(p.dueDate)}
-                      </span>
+            {/* phone: card list (quick glance on location, mid-work) */}
+            <ul className="divide-y divide-rule-soft sm:hidden">
+              {filtered.map((p) => (
+                <li key={p.id}>
+                  <Link
+                    to={`/projects/${p.id}`}
+                    className={cn(
+                      "block px-4 py-3.5 active:bg-ink-50",
+                      p.isLate && "border-l-[3px] border-l-late",
                     )}
-                  </div>
-                  <p className="mt-0.5 text-xs text-gray-500">
-                    {p.clientName}
-                    {p.campaign ? ` · ${p.campaign}` : ""}
-                  </p>
-                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                    <PriorityDot priority={p.priority as "high" | "medium" | "low"} />
-                    {p.status === "completed" ? (
-                      <Badge tone="green">Completed</Badge>
-                    ) : p.currentStage ? (
-                      <Badge tone="accent">{p.currentStage}</Badge>
-                    ) : null}
-                    <span className="text-xs text-gray-400">
-                      {p.stagesTotal > 0 ? `${p.stagesDone}/${p.stagesTotal} stages` : ""}
-                      {p.currentAssignees.length > 0 ? ` · ${p.currentAssignees.join(", ")}` : ""}
-                    </span>
-                  </div>
-                </Link>
-              </li>
-            ))}
-          </ul>
-          {/* desktop: table */}
-          <div className="hidden overflow-x-auto sm:block">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100 text-left text-xs uppercase tracking-wide text-gray-400">
-                  <th className="px-4 py-3">Client / Project</th>
-                  <th className="px-4 py-3">Priority</th>
-                  <th className="px-4 py-3">Stage</th>
-                  <th className="px-4 py-3">On it</th>
-                  <th className="px-4 py-3">Progress</th>
-                  <th className="px-4 py-3">Due</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((p) => (
-                  <tr
-                    key={p.id}
-                    className={`border-b border-gray-50 hover:bg-gray-50 ${p.isLate ? "shadow-[inset_3px_0_0_theme(colors.red.500)]" : ""}`}
                   >
-                    <td className="px-4 py-3">
-                      <Link to={`/projects/${p.id}`} className="block">
-                        <span className="font-medium text-gray-900">{p.title}</span>
-                        <span className="block text-xs text-gray-500">
-                          {p.clientName}
-                          {p.campaign ? ` · ${p.campaign}` : ""}
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="display truncate text-base text-ink-900">{p.title}</span>
+                      {p.dueDate && (
+                        <span
+                          className={cn(
+                            "shrink-0 font-mono text-small tabular-nums",
+                            p.isLate ? "font-medium text-late" : "text-ink-400",
+                          )}
+                        >
+                          {formatShort(p.dueDate).toUpperCase()}
                         </span>
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3">
-                      <PriorityDot priority={p.priority as "high" | "medium" | "low"} />
-                    </td>
-                    <td className="px-4 py-3">
+                      )}
+                    </div>
+                    <p className="mt-0.5 truncate text-small text-ink-400">
+                      {p.clientName}
+                      {p.campaign ? ` · ${p.campaign}` : ""}
+                    </p>
+                    <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-2">
+                      <StageBar done={p.stagesDone} total={p.stagesTotal} late={p.isLate} />
                       {p.status === "completed" ? (
-                        <Badge tone="green">Completed</Badge>
+                        <Badge tone="done">Completed</Badge>
                       ) : p.currentStage ? (
-                        <Badge tone="accent">{p.currentStage}</Badge>
-                      ) : (
-                        <span className="text-xs text-gray-400">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-gray-600">
-                      {p.currentAssignees.length > 0 ? (
-                        <AvatarStack names={p.currentAssignees} />
-                      ) : (
-                        <span className="text-xs text-gray-400">Unassigned</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-gray-600">
-                      {p.stagesTotal > 0 ? `${p.stagesDone}/${p.stagesTotal}` : "—"}
-                    </td>
-                    <td className="px-4 py-3">
-                      {p.dueDate ? (
-                        <span className={p.isLate ? "font-medium text-red-600" : "text-gray-600"}>
-                          {formatShort(p.dueDate)}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-gray-400">—</span>
-                      )}
-                    </td>
+                        <span className="truncate text-small text-ink-600">{p.currentStage}</span>
+                      ) : null}
+                      {p.currentAssignees.length > 0 && <AvatarStack names={p.currentAssignees} />}
+                      <PriorityDot priority={p.priority as "high" | "medium" | "low"} />
+                    </div>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+
+            {/* desktop: table */}
+            <div className="hidden overflow-x-auto sm:block">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-rule text-left">
+                    {["Client / Project", "Stage", "On it", "Progress", "Due"].map((h) => (
+                      <th key={h} className="eyebrow px-4 py-3 text-ink-400">
+                        {h}
+                      </th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {filtered.map((p) => (
+                    <tr
+                      key={p.id}
+                      className={cn(
+                        "border-b border-rule-soft transition-colors last:border-0 hover:bg-ink-50/70",
+                        p.isLate && "shadow-[inset_3px_0_0_var(--color-late)]",
+                      )}
+                    >
+                      <td className="px-4 py-3.5">
+                        <Link to={`/projects/${p.id}`} className="block">
+                          <span className="display text-base text-ink-900">{p.title}</span>
+                          <span className="mt-0.5 flex items-center gap-2 text-small text-ink-400">
+                            {p.clientName}
+                            {p.campaign ? ` · ${p.campaign}` : ""}
+                            <PriorityDot priority={p.priority as "high" | "medium" | "low"} />
+                          </span>
+                        </Link>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        {p.status === "completed" ? (
+                          <Badge tone="done">Completed</Badge>
+                        ) : p.currentStage ? (
+                          <span className="text-base text-ink-700">{p.currentStage}</span>
+                        ) : (
+                          <span className="font-mono text-small text-ink-300">——</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        {p.currentAssignees.length > 0 ? (
+                          <AvatarStack names={p.currentAssignees} />
+                        ) : (
+                          <span className="text-small text-ink-300">Unassigned</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <StageBar done={p.stagesDone} total={p.stagesTotal} late={p.isLate} />
+                      </td>
+                      <td className="px-4 py-3.5">
+                        {p.dueDate ? (
+                          <span
+                            className={cn(
+                              "font-mono text-small tabular-nums",
+                              p.isLate ? "font-medium text-late" : "text-ink-600",
+                            )}
+                          >
+                            {formatShort(p.dueDate).toUpperCase()}
+                          </span>
+                        ) : (
+                          <span className="font-mono text-small text-ink-300">——</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </>
         )}
       </Card>
     </div>
+  );
+}
+
+/**
+ * Progress as the chain it actually is: one segment per stage, filled behind
+ * the work, saffron on the stage that is live. "3/5" makes you do arithmetic;
+ * this you just see.
+ */
+function StageBar({ done, total, late }: { done: number; total: number; late?: boolean }) {
+  if (total <= 0) return <span className="font-mono text-small text-ink-300">——</span>;
+  return (
+    <span className="inline-flex items-center gap-2" title={`${done} of ${total} stages done`}>
+      <span className="flex gap-0.5">
+        {Array.from({ length: total }, (_, i) => (
+          <span
+            key={i}
+            className={cn(
+              "h-1.5 w-3 rounded-full",
+              i < done ? "bg-ink-700" : i === done ? (late ? "bg-late" : "bg-now") : "bg-ink-100",
+            )}
+          />
+        ))}
+      </span>
+      <span className="font-mono text-small tabular-nums text-ink-400">
+        {done}/{total}
+      </span>
+    </span>
   );
 }
 
@@ -297,16 +344,13 @@ function CreateProjectCard({ onDone }: { onDone: () => void }) {
               />
             )}
           </div>
-          <div>
-            <Label htmlFor="p-title">Title (e.g. “18 reels”)</Label>
+          <Field label="Title" htmlFor="p-title" hint="What the client asked for — “18 reels”">
             <Input id="p-title" required value={title} onChange={(e) => setTitle(e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="p-campaign">Campaign (optional)</Label>
+          </Field>
+          <Field label="Campaign (optional)" htmlFor="p-campaign">
             <Input id="p-campaign" value={campaign} onChange={(e) => setCampaign(e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="p-priority">Priority</Label>
+          </Field>
+          <Field label="Priority" htmlFor="p-priority">
             <Select
               id="p-priority"
               value={priority}
@@ -316,10 +360,9 @@ function CreateProjectCard({ onDone }: { onDone: () => void }) {
               <option value="medium">Medium</option>
               <option value="low">Low</option>
             </Select>
-          </div>
+          </Field>
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="p-start">Start date</Label>
+            <Field label="Starts" htmlFor="p-start">
               <Input
                 id="p-start"
                 type="date"
@@ -327,9 +370,8 @@ function CreateProjectCard({ onDone }: { onDone: () => void }) {
                 max={dueDate || undefined}
                 onChange={(e) => setStartDate(e.target.value)}
               />
-            </div>
-            <div>
-              <Label htmlFor="p-due">Due date</Label>
+            </Field>
+            <Field label="Due" htmlFor="p-due">
               <Input
                 id="p-due"
                 type="date"
@@ -337,21 +379,19 @@ function CreateProjectCard({ onDone }: { onDone: () => void }) {
                 min={startDate || undefined}
                 onChange={(e) => setDueDate(e.target.value)}
               />
-            </div>
+            </Field>
           </div>
-          <div>
-            <Label htmlFor="p-budget">Budget (EGP, optional)</Label>
+          <Field label="Budget, EGP (optional)" htmlFor="p-budget">
             <Input
               id="p-budget"
               type="number"
               min={0}
-              placeholder="e.g. 20000"
+              placeholder="20000"
               value={budget}
               onChange={(e) => setBudget(e.target.value)}
             />
-          </div>
-          <div>
-            <Label htmlFor="p-drive">Google Drive link (optional)</Label>
+          </Field>
+          <Field label="Google Drive link (optional)" htmlFor="p-drive">
             <Input
               id="p-drive"
               type="url"
@@ -359,14 +399,13 @@ function CreateProjectCard({ onDone }: { onDone: () => void }) {
               value={driveLink}
               onChange={(e) => setDriveLink(e.target.value)}
             />
-          </div>
-          <div>
-            <Label htmlFor="p-template">Workflow</Label>
-            <Select
-              id="p-template"
-              value={templateId}
-              onChange={(e) => setTemplateId(e.target.value)}
-            >
+          </Field>
+          <Field
+            label="Workflow"
+            htmlFor="p-template"
+            hint={selectedTemplate?.chain.map((c) => c.stageName).join("  →  ")}
+          >
+            <Select id="p-template" value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
               <option value="">No template (ad-hoc tasks)</option>
               {templates.data
                 ?.filter((t) => t.active)
@@ -376,23 +415,21 @@ function CreateProjectCard({ onDone }: { onDone: () => void }) {
                   </option>
                 ))}
             </Select>
-            {selectedTemplate && (
-              <p className="mt-1 text-xs text-gray-500">
-                {selectedTemplate.chain.map((c) => c.stageName).join(" → ")}
-              </p>
-            )}
-          </div>
+          </Field>
           {templateId && (
-            <div className="sm:col-span-2">
-              <Label>Who starts the first stage</Label>
+            <Field label="Who starts the first stage" className="sm:col-span-2">
               <PeoplePicker
                 selected={firstAssigneeIds}
                 onChange={setFirstAssigneeIds}
                 emptyHint="Leave empty and it lands in the unassigned queue."
               />
-            </div>
+            </Field>
           )}
-          {error && <p className="text-sm text-red-600 sm:col-span-2">{error}</p>}
+          {error && (
+            <p className="rounded-field border-l-2 border-late bg-late-tint px-3 py-2 text-small text-late-ink sm:col-span-2">
+              {error}
+            </p>
+          )}
           <div className="flex gap-2 sm:col-span-2">
             <Button type="submit" disabled={createProject.isPending || createClient.isPending}>
               {createProject.isPending ? "Creating…" : "Create project"}

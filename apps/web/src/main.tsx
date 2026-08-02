@@ -1,4 +1,7 @@
-import "@fontsource-variable/inter";
+// Display face carries a width axis — see the `display` utility in styles.css.
+import "@fontsource-variable/archivo/wdth.css";
+import "@fontsource-variable/instrument-sans";
+import "@fontsource-variable/jetbrains-mono";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import { StrictMode } from "react";
@@ -17,7 +20,9 @@ import { BoardPage } from "@/routes/board";
 import { ExpensesPage } from "@/routes/expenses";
 import { MoneyPage } from "@/routes/money";
 import { MyWorkPage } from "@/routes/my-work";
+import { PeoplePage } from "@/routes/people";
 import { ProjectDetailPage } from "@/routes/project-detail";
+import { TimeOffPage } from "@/routes/time-off";
 import { UsersSettingsPage } from "@/routes/settings-users";
 import { WorkflowsSettingsPage } from "@/routes/settings-workflows";
 import { TaskDetailPage } from "@/routes/task-detail";
@@ -46,6 +51,8 @@ const router = createBrowserRouter([
       { path: "/calendar", element: <CalendarPage /> },
       { path: "/money", element: <MoneyPage /> },
       { path: "/expenses", element: <ExpensesPage /> },
+      { path: "/time-off", element: <TimeOffPage /> },
+      { path: "/people", element: <PeoplePage /> },
       { path: "/projects/:id", element: <ProjectDetailPage /> },
       { path: "/tasks/:id", element: <TaskDetailPage /> },
       { path: "/settings/users", element: <UsersSettingsPage /> },

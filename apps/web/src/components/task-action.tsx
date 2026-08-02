@@ -1,11 +1,12 @@
 import { can, taskLabel, type TaskStatus } from "@mams/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/feedback";
+import { Field, Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
+import { RailNode } from "@/components/handoff-rail";
 import { PeoplePicker } from "@/components/people-picker";
 import { nextAction, type Viewer } from "@/components/task-bits";
 import { formatShort } from "@/lib/dates";
@@ -66,7 +67,7 @@ export function TaskActionButton({
       action!.to === "in_progress" && task.status === "todo"
         ? `Started "${label}"`
         : action!.to === "done"
-          ? `"${label}" completed ✓`
+          ? `"${label}" completed`
           : "Done",
     );
   }
@@ -88,6 +89,12 @@ export function TaskActionButton({
   );
 }
 
+/**
+ * The visible handoff. Finishing a stage moves the work to someone else, so
+ * the dialog draws that move as two links of the rail: the stage closing above,
+ * the stage opening below, and the face that is about to inherit it. Nobody
+ * should be able to hand work over without seeing whose hands it lands in.
+ */
 function CompleteDialog({
   task,
   viewer,
@@ -119,6 +126,9 @@ function CompleteDialog({
   const gated = task.requiresApproval && !can(viewer, "tasks.approve");
   const plannedAssignees =
     p?.kind === "handoff" ? (overrideAssignees ?? p.assignees.map((a) => a.id)) : [];
+  const plannedNames = plannedAssignees
+    .map((id) => users.data?.find((u) => u.id === id)?.name)
+    .filter((n): n is string => Boolean(n));
 
   async function confirm() {
     setBusy(true);
@@ -141,19 +151,16 @@ function CompleteDialog({
       if (gated) {
         toast.success("Sent for approval — the approvers have been notified.");
       } else if (p?.kind === "handoff") {
-        const names = plannedAssignees
-          .map((id) => users.data?.find((u) => u.id === id)?.name)
-          .filter(Boolean)
-          .join(" & ");
+        const names = plannedNames.join(" & ");
         toast.success(
           names
             ? `"${label}" done — ${p.nextLabel} goes to ${names}.`
             : `"${label}" done — ${p.nextLabel} still needs someone.`,
         );
       } else if (p?.kind === "last_stage") {
-        toast.success(`"${label}" done — that was the last stage! 🎉`);
+        toast.success(`"${label}" done — that was the last stage.`);
       } else {
-        toast.success(`"${label}" completed ✓`);
+        toast.success(`"${label}" completed`);
       }
       onDone();
       onClose();
@@ -165,7 +172,8 @@ function CompleteDialog({
 
   return (
     <Modal
-      title={gated ? "Submit for approval" : `Finish “${label}”?`}
+      eyebrow={gated ? "Approval required" : "Handing off"}
+      title={gated ? "Submit for approval" : `Finish ${label}`}
       onClose={onClose}
       footer={
         <>
@@ -173,81 +181,98 @@ function CompleteDialog({
             Cancel
           </Button>
           <Button onClick={confirm} disabled={busy || preview.isPending}>
-            {busy ? "Working…" : gated ? "Submit" : "Mark done"}
+            {busy ? "Working…" : gated ? "Submit for approval" : "Mark done"}
           </Button>
         </>
       }
     >
       {preview.isPending ? (
-        <p className="text-sm text-gray-500">Checking what happens next…</p>
+        <div className="space-y-2">
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="h-12 w-full" />
+        </div>
       ) : gated ? (
-        <p className="text-sm text-gray-600">
+        <p className="text-base text-ink-600">
           This stage needs approval. The approvers are notified, and the next stage starts once one
           of them signs off.
         </p>
       ) : p?.kind === "handoff" ? (
-        <div className="space-y-4">
-          <div className="flex items-center gap-3 rounded-xl bg-canvas px-4 py-3">
-            <span className="text-sm font-medium text-gray-500 line-through">{label}</span>
-            <ArrowRight size={16} className="shrink-0 text-accent-600" />
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-gray-900">{p.nextLabel}</p>
-              <p className="text-xs text-gray-500">
-                {p.assignees.length > 0
-                  ? p.route === "pre_assigned"
-                    ? `already assigned to ${p.assignees.map((a) => a.name).join(" & ")}`
-                    : `stays with ${p.assignees.map((a) => a.name).join(" & ")} (same people, right skills)`
-                  : "no one qualifies — it lands in the unassigned queue"}
-                {p.defaultDeadline ? ` · due ${formatShort(p.defaultDeadline)}` : ""}
-              </p>
+        <div className="space-y-5">
+          <div className="rounded-card border border-rule bg-paper/60 p-4">
+            <div className="flex gap-3">
+              <RailNode state="done" names={[]} />
+              <div className="min-w-0 pt-1">
+                <p className="text-base font-medium text-ink-400 line-through">{label}</p>
+                <p className="text-small text-ink-400">closing now</p>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <RailNode state="live" names={plannedNames} last />
+              <div className="min-w-0 pt-1">
+                <p className="display text-lead text-ink-900">{p.nextLabel}</p>
+                <p className="text-small text-ink-500">
+                  {plannedNames.length > 0
+                    ? p.route === "pre_assigned"
+                      ? `already with ${plannedNames.join(" & ")}`
+                      : `stays with ${plannedNames.join(" & ")} — same people, right skills`
+                    : "nobody qualifies yet — it lands in the unassigned queue"}
+                  {p.defaultDeadline && (
+                    <>
+                      {" · "}
+                      <span className="font-mono text-ink-600">
+                        due {formatShort(p.defaultDeadline).toUpperCase()}
+                      </span>
+                    </>
+                  )}
+                </p>
+              </div>
             </div>
           </div>
 
           {canAssign && (
-            <div>
-              <Label>Hand off to</Label>
+            <Field label="Hand off to">
               <PeoplePicker
                 selected={plannedAssignees}
                 onChange={setOverrideAssignees}
                 emptyHint="Nobody yet — it goes to the unassigned queue."
               />
-            </div>
+            </Field>
           )}
           {canSchedule && (
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label htmlFor="ho-start">Start date</Label>
+              <Field label="Starts" htmlFor="ho-start">
                 <Input
                   id="ho-start"
                   type="date"
                   value={overrideStart ?? p.defaultStartDate ?? ""}
                   onChange={(e) => setOverrideStart(e.target.value || null)}
                 />
-              </div>
-              <div>
-                <Label htmlFor="ho-deadline">Deadline</Label>
+              </Field>
+              <Field label="Due" htmlFor="ho-deadline">
                 <Input
                   id="ho-deadline"
                   type="date"
                   value={overrideDeadline ?? p.defaultDeadline ?? ""}
                   onChange={(e) => setOverrideDeadline(e.target.value || null)}
                 />
-              </div>
+              </Field>
             </div>
           )}
           {!canAssign && p.assignees.length === 0 && (
-            <p className="text-xs text-gray-500">
+            <p className="text-small text-ink-400">
               Whoever assigns work will be notified to staff the next stage.
             </p>
           )}
         </div>
       ) : p?.kind === "last_stage" ? (
-        <p className="text-sm text-gray-600">
-          This is the <span className="font-medium">last stage</span> — completing it finishes the
-          whole project.
-        </p>
+        <div className="rounded-card border border-done/25 bg-done-tint px-4 py-3.5">
+          <p className="eyebrow text-done">Last stage</p>
+          <p className="mt-1.5 text-base text-done-ink">
+            Finishing this closes the whole project. Nothing hands off after it.
+          </p>
+        </div>
       ) : (
-        <p className="text-sm text-gray-600">Mark this task as done?</p>
+        <p className="text-base text-ink-600">Mark this task as done?</p>
       )}
     </Modal>
   );

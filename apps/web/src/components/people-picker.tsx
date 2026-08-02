@@ -7,12 +7,13 @@ import { cn } from "@/lib/utils";
 
 /**
  * Pick the people on something. Multi-select by design — assignment is a set,
- * not an owner, so there is no "primary" slot to single out.
+ * not an owner, so there is no "primary" slot to single out. Selected chips go
+ * solid ink: at a glance the row reads as a filled-in cast list.
  */
 export function PeoplePicker({
   selected,
   onChange,
-  emptyHint = "Nobody assigned yet.",
+  emptyHint = "Nobody on this yet.",
   disabled,
 }: {
   selected: string[];
@@ -24,7 +25,7 @@ export function PeoplePicker({
   const users = useQuery(trpc.users.list.queryOptions());
 
   if (users.isPending) return <Skeleton className="h-9 w-full" />;
-  if (users.isError) return <p className="text-sm text-red-600">Couldn't load the team.</p>;
+  if (users.isError) return <p className="text-small text-late">Couldn't load the team.</p>;
 
   const active = users.data.filter((u) => u.active);
 
@@ -45,14 +46,14 @@ export function PeoplePicker({
               aria-pressed={on}
               onClick={() => toggle(u.id)}
               className={cn(
-                "inline-flex items-center gap-1.5 rounded-full border py-1 pl-1 pr-3 text-xs font-medium transition-colors disabled:opacity-50",
+                "inline-flex items-center gap-2 rounded-full border py-1 pl-1 pr-3 text-small font-medium transition-colors disabled:opacity-45",
                 on
-                  ? "border-accent-600 bg-accent-50 text-accent-700"
-                  : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50",
+                  ? "border-ink-900 bg-ink-900 text-white"
+                  : "border-rule bg-surface text-ink-600 hover:border-ink-300 hover:text-ink-900",
               )}
             >
               {on ? (
-                <span className="flex size-6 items-center justify-center rounded-full bg-accent-600 text-white">
+                <span className="flex size-6 items-center justify-center rounded-full bg-white/15 text-white">
                   <Check size={13} strokeWidth={3} />
                 </span>
               ) : (
@@ -63,7 +64,7 @@ export function PeoplePicker({
           );
         })}
       </div>
-      {selected.length === 0 && <p className="mt-1.5 text-xs text-gray-400">{emptyHint}</p>}
+      {selected.length === 0 && <p className="mt-2 text-small text-ink-400">{emptyHint}</p>}
     </div>
   );
 }

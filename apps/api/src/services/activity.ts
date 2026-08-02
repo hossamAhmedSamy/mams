@@ -11,7 +11,16 @@ export async function logActivity(
   tx: Tx,
   entry: {
     actorId: string | null;
-    entityType: "task" | "project" | "client" | "expense" | "income" | "user" | "settings";
+    entityType:
+      | "task"
+      | "project"
+      | "client"
+      | "expense"
+      | "income"
+      | "user"
+      | "settings"
+      | "leave"
+      | "payslip";
     entityId: string;
     action: string;
     detail?: Record<string, unknown>;

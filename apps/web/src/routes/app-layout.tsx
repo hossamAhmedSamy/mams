@@ -5,14 +5,18 @@ import {
   Home,
   LayoutGrid,
   LogOut,
+  Palmtree,
   Receipt,
   Settings,
+  UsersRound,
   Wallet,
 } from "lucide-react";
 import { Navigate, NavLink, Outlet, useNavigate } from "react-router";
 import { Skeleton } from "@/components/ui/feedback";
 import { Avatar } from "@/components/ui/page";
+import { SlateMark } from "@/components/ui/slate-mark";
 import { authClient } from "@/lib/auth-client";
+import { dayStamp, todayISO } from "@/lib/dates";
 import { firstName, useCan, useMe, type Viewer } from "@/lib/session";
 import { cn } from "@/lib/utils";
 
@@ -33,8 +37,16 @@ const NAV: NavItem[] = [
   { to: "/board", label: "Projects", short: "Projects", icon: LayoutGrid },
   { to: "/calendar", label: "Calendar", short: "Calendar", icon: CalendarDays },
   { to: "/expenses", label: "Expenses", short: "Expenses", icon: Receipt },
+  { to: "/time-off", label: "Time off", short: "Time off", icon: Palmtree },
   { to: "/money", label: "Money", short: "Money", icon: Wallet, needs: "money.view" },
-  { to: "/settings/users", label: "Settings", short: "Settings", icon: Settings, needs: "settings.team" },
+  { to: "/people", label: "People", short: "People", icon: UsersRound, needs: "hr.manage" },
+  {
+    to: "/settings/users",
+    label: "Settings",
+    short: "Settings",
+    icon: Settings,
+    needs: "settings.team",
+  },
 ];
 
 export function useNav(): NavItem[] {
@@ -42,6 +54,11 @@ export function useNav(): NavItem[] {
   return NAV.filter((item) => !item.needs || can(item.needs));
 }
 
+/**
+ * The desk and the document: navigation is ink and never moves, the work is
+ * paper and always scrolls. On a phone the ink wraps the paper top and bottom,
+ * which keeps the thumb on the dark chrome and the eyes on the white sheet.
+ */
 export function AppLayout() {
   const me = useMe();
   const nav = useNav();
@@ -49,9 +66,12 @@ export function AppLayout() {
 
   if (me.isPending) {
     return (
-      <div className="mx-auto max-w-6xl space-y-4 p-8">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-64 w-full" />
+      <div className="flex min-h-screen">
+        <div className="hidden w-60 shrink-0 bg-ink-900 lg:block" />
+        <div className="mx-auto w-full max-w-[1140px] space-y-4 p-8">
+          <Skeleton className="h-9 w-56" />
+          <Skeleton className="h-72 w-full" />
+        </div>
       </div>
     );
   }
@@ -66,112 +86,111 @@ export function AppLayout() {
   }
 
   return (
-    <div className="flex min-h-screen">
-      <aside className="hidden w-60 shrink-0 flex-col border-r border-hairline bg-white p-4 lg:flex">
-        <Wordmark />
-        <nav className="mt-6 flex flex-1 flex-col gap-0.5">
+    <div className="min-h-screen">
+      {/* ---- desk: the ink rail ------------------------------------------ */}
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col bg-ink-900 lg:flex">
+        <div className="px-5 pb-6 pt-6">
+          <div className="flex items-center gap-2.5 text-white">
+            <SlateMark size={22} />
+            <span className="display text-lead tracking-tight">MAMS</span>
+          </div>
+          <p className="mt-3 font-mono text-micro uppercase tracking-widest text-ink-500">
+            {dayStamp(todayISO())}
+          </p>
+        </div>
+
+        <nav className="flex flex-1 flex-col gap-0.5 px-3">
           {nav.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               className={({ isActive }) =>
                 cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                  "relative flex items-center gap-3 rounded-field px-3 py-2.5 text-base transition-colors",
                   isActive
-                    ? "bg-accent-50 text-accent-700"
-                    : "text-gray-600 hover:bg-gray-50 hover:text-gray-900",
+                    ? "bg-white/8 font-medium text-white"
+                    : "text-ink-400 hover:bg-white/5 hover:text-ink-100",
                 )
               }
             >
-              <item.icon size={18} /> {item.label}
+              {({ isActive }) => (
+                <>
+                  {isActive && (
+                    <span className="absolute inset-y-2 left-0 w-[3px] rounded-r-full bg-now-bright" />
+                  )}
+                  <item.icon size={17} strokeWidth={isActive ? 2.2 : 1.9} />
+                  {item.label}
+                </>
+              )}
             </NavLink>
           ))}
         </nav>
-        <div className="border-t border-hairline pt-3">
-          <div className="flex items-center gap-2.5 px-2">
+
+        <div className="border-t border-white/8 p-3">
+          <div className="flex items-center gap-2.5 px-2 py-1.5">
             <Avatar name={viewer.name} />
             <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-gray-900">{viewer.name}</p>
-              <p className="truncate text-xs text-gray-400">{viewer.email}</p>
+              <p className="truncate text-small font-medium text-white">{viewer.name}</p>
+              <p className="truncate text-micro text-ink-500">{viewer.email}</p>
             </div>
           </div>
           <button
             onClick={signOut}
-            className="mt-2 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-800"
+            className="mt-1 flex w-full items-center gap-3 rounded-field px-3 py-2 text-small text-ink-400 transition-colors hover:bg-white/5 hover:text-ink-100"
           >
-            <LogOut size={17} /> Sign out
+            <LogOut size={16} /> Sign out
           </button>
         </div>
       </aside>
 
-      {/* min-w-0: a flex item defaults to min-width:auto, which would let wide
-          content (the day strip, tables) push the whole page sideways instead
-          of scrolling inside its own container */}
-      <div className="min-w-0 flex-1 pb-[calc(env(safe-area-inset-bottom)+4.5rem)] lg:pb-0">
-        {/* phone + tablet top bar */}
-        <div className="sticky top-0 z-30 flex items-center gap-2.5 border-b border-hairline bg-white/90 px-4 py-2.5 backdrop-blur lg:hidden">
-          <Wordmark compact />
-          <div className="ml-auto flex items-center gap-2">
-            <Avatar name={viewer.name} size="sm" />
-            <button
-              onClick={signOut}
-              aria-label="Sign out"
-              className="flex size-9 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-50"
-            >
-              <LogOut size={18} />
-            </button>
-          </div>
-        </div>
+      {/* ---- document: the paper ------------------------------------------
+          min-w-0 so wide content (day strips, tables) scrolls inside its own
+          container instead of pushing the whole page sideways. */}
+      <div className="min-w-0 lg:pl-60">
+        <header className="sticky top-0 z-30 flex items-center gap-3 bg-ink-900 px-4 py-3 text-white lg:hidden">
+          <SlateMark size={20} />
+          <span className="display text-base tracking-tight">MAMS</span>
+          <span className="ml-auto font-mono text-micro uppercase tracking-widest text-ink-500">
+            {dayStamp(todayISO())}
+          </span>
+          <button
+            onClick={signOut}
+            aria-label="Sign out"
+            className="-mr-1.5 flex size-9 items-center justify-center rounded-field text-ink-400 transition-colors hover:bg-white/8 hover:text-white"
+          >
+            <LogOut size={17} />
+          </button>
+        </header>
 
-        <main className="mx-auto max-w-6xl p-4 sm:p-6 lg:p-8">
+        <main className="mx-auto min-h-[60vh] w-full max-w-[1140px] px-4 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] pt-6 sm:px-7 sm:pt-8 lg:px-10 lg:pb-14 lg:pt-10">
           <Outlet />
         </main>
 
-        {/* phone bottom tab bar — five slots max, the rest live on Home */}
-        <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t border-hairline bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
+        {/* phone tab bar — five slots; the rest live on Home */}
+        <nav className="fixed inset-x-0 bottom-0 z-40 flex bg-ink-900 pb-[env(safe-area-inset-bottom)] lg:hidden">
           {nav.slice(0, 5).map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               className={({ isActive }) =>
                 cn(
-                  "flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-medium transition-colors",
-                  isActive ? "text-accent-700" : "text-gray-400",
+                  "relative flex flex-1 flex-col items-center justify-center gap-1 py-2.5 text-[10px] font-medium transition-colors",
+                  isActive ? "text-white" : "text-ink-500",
                 )
               }
             >
               {({ isActive }) => (
                 <>
-                  <item.icon size={20} strokeWidth={isActive ? 2.4 : 2} />
+                  {isActive && (
+                    <span className="absolute inset-x-5 top-0 h-[2.5px] rounded-b-full bg-now-bright" />
+                  )}
+                  <item.icon size={19} strokeWidth={isActive ? 2.3 : 1.9} />
                   {item.short}
                 </>
               )}
             </NavLink>
           ))}
         </nav>
-      </div>
-    </div>
-  );
-}
-
-function Wordmark({ compact }: { compact?: boolean }) {
-  return (
-    <div className="flex items-center gap-2.5 px-1">
-      <span
-        className={cn(
-          "flex items-center justify-center rounded-xl bg-accent-600 font-black tracking-tight text-white",
-          compact ? "size-8 text-xs" : "size-9 text-sm",
-        )}
-      >
-        M
-      </span>
-      <div>
-        <span className="block text-[15px] font-bold leading-tight tracking-tight text-gray-900">
-          MAMS
-        </span>
-        {!compact && (
-          <span className="block text-xs leading-tight text-gray-400">Agency operations</span>
-        )}
       </div>
     </div>
   );
