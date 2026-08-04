@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
@@ -258,6 +258,7 @@ function StageBar({ done, total, late }: { done: number; total: number; late?: b
 
 function CreateProjectCard({ onDone }: { onDone: () => void }) {
   const trpc = useTRPC();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const clients = useQuery(trpc.clients.list.queryOptions());
   const templates = useQuery(trpc.workflows.listTemplates.queryOptions());
@@ -278,10 +279,14 @@ function CreateProjectCard({ onDone }: { onDone: () => void }) {
   const createClient = useMutation(trpc.clients.create.mutationOptions());
   const createProject = useMutation(
     trpc.projects.create.mutationOptions({
-      onSuccess: async () => {
+      onSuccess: async (created) => {
         await queryClient.invalidateQueries({ queryKey: trpc.projects.pathKey() });
         await queryClient.invalidateQueries({ queryKey: trpc.clients.pathKey() });
         onDone();
+        // straight into the project — the dates on this form are only the
+        // outer bounds; shooting and editing still need their own deadlines
+        // and assignees, which happens on the project page, not here.
+        navigate(`/projects/${created.id}`);
       },
       onError: (err) => setError(err.message),
     }),

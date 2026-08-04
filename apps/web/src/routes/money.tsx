@@ -160,8 +160,93 @@ export function MoneyPage() {
         </>
       )}
 
+      <RecordExpenseCard />
       <RecurringCard />
     </div>
+  );
+}
+
+function RecordExpenseCard() {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const categories = useQuery(trpc.finance.listCategories.queryOptions());
+  const [amount, setAmount] = useState("");
+  const [date, setDate] = useState(todayISO());
+  const [categoryId, setCategoryId] = useState("");
+  const [note, setNote] = useState("");
+  const add = useMutation(
+    trpc.finance.addExpense.mutationOptions({
+      onSuccess: () => {
+        toast.success("Expense recorded");
+        setAmount("");
+        setNote("");
+        queryClient.invalidateQueries({ queryKey: trpc.finance.pathKey() });
+      },
+      onError: (err) => toast.error(err.message),
+    }),
+  );
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="min-w-0">
+          <CardTitle>Record expense</CardTitle>
+          <p className="mt-0.5 text-small text-ink-400">
+            One-off costs not tied to a project — office supplies, gear bought outright. Posts as
+            Overhead. For a project's costs, use that project's Ledger tab instead.
+          </p>
+        </div>
+      </CardHeader>
+      <CardBody className="space-y-4">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Field label="Amount (EGP)" htmlFor="oh-amount">
+            <Input
+              id="oh-amount"
+              type="number"
+              min={0}
+              className="font-mono"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
+          </Field>
+          <Field label="Date" htmlFor="oh-date">
+            <Input id="oh-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </Field>
+          <Field label="Category" htmlFor="oh-cat">
+            <Select id="oh-cat" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+              <option value="">Choose…</option>
+              {categories.data?.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+        <Field label="Note" htmlFor="oh-note">
+          <Input
+            id="oh-note"
+            placeholder="Printer ink"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </Field>
+        <Button
+          size="sm"
+          disabled={add.isPending || !amount || !categoryId}
+          onClick={() =>
+            add.mutate({
+              categoryId,
+              amount: Number(amount),
+              spentOn: date,
+              note: note || undefined,
+            })
+          }
+        >
+          Add expense
+        </Button>
+      </CardBody>
+    </Card>
   );
 }
 

@@ -120,7 +120,7 @@ export function TaskDetailPage() {
                 <CardTitle>Details</CardTitle>
               </CardHeader>
               <CardBody>
-                <p className="whitespace-pre-wrap text-base leading-relaxed text-ink-700">
+                <p className="whitespace-pre-wrap break-words text-base leading-relaxed text-ink-700">
                   {t.details}
                 </p>
               </CardBody>
@@ -313,7 +313,9 @@ function CommentsCard({ taskId }: { taskId: string }) {
                     })}
                   </span>
                 </div>
-                <p className="mt-1 whitespace-pre-wrap text-base text-ink-700">{c.body}</p>
+                <p className="mt-1 whitespace-pre-wrap break-words text-base text-ink-700">
+                  {c.body}
+                </p>
               </li>
             ))}
           </ul>
