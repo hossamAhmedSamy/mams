@@ -112,6 +112,15 @@ export async function requestLeave(
   actor: Actor,
   input: { type: LeaveType; startDate: string; endDate: string; reason?: string },
 ) {
+  // The owner holds hr.manage implicitly, so a request of his own would land
+  // straight back in his own approval queue — there is nobody else to decide
+  // it. Same "no leave balance for the owner" rule as isStaff, further down.
+  if (actor.role === "admin") {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "The owner doesn't book leave through this — there's no one to approve it.",
+    });
+  }
   const days = assertSpan(input.startDate, input.endDate);
   await assertNoOverlap(db, actor.id, input.startDate, input.endDate);
 

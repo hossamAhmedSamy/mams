@@ -13,6 +13,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { useState } from "react";
+import { Link } from "react-router";
 import { toast } from "sonner";
 import {
   BalanceRow,
@@ -21,12 +22,13 @@ import {
   LeaveTypeChip,
   leaveSpan,
 } from "@/components/leave-bits";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState, ErrorBanner, SkeletonRows } from "@/components/ui/feedback";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page";
 import { formatShort, todayISO } from "@/lib/dates";
+import { useMe } from "@/lib/session";
 import { useTRPC } from "@/lib/trpc";
 
 /**
@@ -36,19 +38,30 @@ import { useTRPC } from "@/lib/trpc";
  */
 export function TimeOffPage() {
   const trpc = useTRPC();
+  const me = useMe();
   const mine = useQuery(trpc.hr.me.queryOptions());
   const [asking, setAsking] = useState(false);
+  // The owner holds hr.manage implicitly, so a request of his own would land
+  // straight back in his own approval queue — he manages the team's leave
+  // from People instead, and never books his own.
+  const isOwner = me.data?.role === "admin";
 
   return (
     <div className="settle space-y-6">
       <PageHeader
         eyebrow={mine.data ? `Your ${mine.data.year}` : "Your year"}
         title="Time off & pay"
-        subtitle="Ask for days off, see what's left, and keep your payslips in one place"
+        subtitle={
+          isOwner
+            ? "Your own pay history — leave requests are managed from People"
+            : "Ask for days off, see what's left, and keep your payslips in one place"
+        }
         actions={
-          <Button onClick={() => setAsking((v) => !v)}>
-            <Plus size={16} /> Request time off
-          </Button>
+          !isOwner && (
+            <Button onClick={() => setAsking((v) => !v)}>
+              <Plus size={16} /> Request time off
+            </Button>
+          )
         }
       />
 
@@ -60,32 +73,50 @@ export function TimeOffPage() {
         <ErrorBanner message="Your time off didn't load." onRetry={() => mine.refetch()} />
       ) : (
         <>
-          <Card>
-            <CardBody className="py-5">
-              <BalanceRow balance={mine.data.balance} />
-            </CardBody>
-          </Card>
+          {isOwner ? (
+            <Card>
+              <CardBody>
+                <EmptyState
+                  title="You don't book leave here"
+                  hint="You're the one who decides everyone else's — the approval queue and the team's balances are in People → Time off."
+                  action={
+                    <Link to="/people" className={buttonVariants({ variant: "primary" })}>
+                      Go to People
+                    </Link>
+                  }
+                />
+              </CardBody>
+            </Card>
+          ) : (
+            <>
+              <Card>
+                <CardBody className="py-5">
+                  <BalanceRow balance={mine.data.balance} />
+                </CardBody>
+              </Card>
 
-          {asking && <RequestForm balance={mine.data.balance} onDone={() => setAsking(false)} />}
+              {asking && <RequestForm balance={mine.data.balance} onDone={() => setAsking(false)} />}
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Your requests</CardTitle>
-            </CardHeader>
-            {mine.data.requests.length === 0 ? (
-              <EmptyState
-                title="No days booked yet"
-                hint="Ask for time off here and Adham sees it straight away."
-                action={<Button onClick={() => setAsking(true)}>Request time off</Button>}
-              />
-            ) : (
-              <ul className="divide-y divide-rule-soft">
-                {mine.data.requests.map((req) => (
-                  <RequestRow key={req.id} req={req} />
-                ))}
-              </ul>
-            )}
-          </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Your requests</CardTitle>
+                </CardHeader>
+                {mine.data.requests.length === 0 ? (
+                  <EmptyState
+                    title="No days booked yet"
+                    hint="Ask for time off here and Adham sees it straight away."
+                    action={<Button onClick={() => setAsking(true)}>Request time off</Button>}
+                  />
+                ) : (
+                  <ul className="divide-y divide-rule-soft">
+                    {mine.data.requests.map((req) => (
+                      <RequestRow key={req.id} req={req} />
+                    ))}
+                  </ul>
+                )}
+              </Card>
+            </>
+          )}
 
           <PayCard salary={mine.data.salary} payslips={mine.data.payslips} />
         </>
