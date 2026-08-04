@@ -133,7 +133,7 @@ export function PayrollSection() {
             </CardHeader>
             <ul className="divide-y divide-rule-soft">
               {run.data.rows.map((row) => (
-                <PayrollRow key={row.userId} row={row} period={period} />
+                <PayrollRow key={row.userId} row={row} monthPrepared={run.data.prepared} />
               ))}
             </ul>
           </Card>
@@ -159,7 +159,7 @@ type PayrollRowData = {
   } | null;
 };
 
-function PayrollRow({ row, period }: { row: PayrollRowData; period: string }) {
+function PayrollRow({ row, monthPrepared }: { row: PayrollRowData; monthPrepared: boolean }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [adding, setAdding] = useState(false);
@@ -212,7 +212,9 @@ function PayrollRow({ row, period }: { row: PayrollRowData; period: string }) {
               <Check size={14} /> Pay
             </Button>
           ) : (
-            <Badge tone="neutral">Not prepared</Badge>
+            // the card header already says so when the whole month is unprepared;
+            // this only earns its place when the month is half done
+            monthPrepared && <Badge tone="neutral">Not prepared</Badge>
           )}
         </div>
       </div>
@@ -256,7 +258,6 @@ function PayrollRow({ row, period }: { row: PayrollRowData; period: string }) {
             ))}
         </div>
       )}
-      <span className="sr-only">{period}</span>
     </li>
   );
 }

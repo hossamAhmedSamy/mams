@@ -3,6 +3,7 @@ import {
   type AdjustmentKind,
   DEFAULT_ALLOWANCE,
   dailyRate,
+  dayMonth,
   daysBeyondBalance,
   formatMoney,
   type LeaveBalance,
@@ -400,12 +401,19 @@ export async function deleteLeave(actor: Actor, id: string) {
   });
 }
 
+/**
+ * "The company" is everyone who works for the owner — staff, not owners. He
+ * does not book leave with himself or draw a salary from his own payroll, so
+ * every HR roster is the team as he thinks of it: the rest of the company.
+ */
+const isStaff = and(eq(user.banned, false), ne(user.role, "admin"));
+
 /** The team's year at a glance: what each person has left and what's booked. */
 export async function teamLeave(input: { year: number }) {
   const people = await db
     .select({ id: user.id, name: user.name })
     .from(user)
-    .where(eq(user.banned, false))
+    .where(isStaff)
     .orderBy(asc(user.name));
   const ids = people.map((p) => p.id);
   const used = await usedDaysByType(db, ids, input.year);
@@ -543,7 +551,7 @@ export async function listSalaries() {
   const people = await db
     .select({ id: user.id, name: user.name, email: user.email })
     .from(user)
-    .where(eq(user.banned, false))
+    .where(isStaff)
     .orderBy(asc(user.name));
 
   const today = todayISO(env.TZ_BUSINESS);
@@ -685,7 +693,7 @@ export async function payroll(input: { period: string }) {
   const people = await db
     .select({ id: user.id, name: user.name })
     .from(user)
-    .where(eq(user.banned, false))
+    .where(isStaff)
     .orderBy(asc(user.name));
 
   const slips = await payslipsWithLines(db, eq(payslips.period, input.period));
@@ -729,10 +737,7 @@ export async function preparePayroll(actor: Actor, input: { period: string }) {
   const { first, last } = periodBounds(input.period);
 
   return db.transaction(async (tx) => {
-    const people = await tx
-      .select({ id: user.id, name: user.name })
-      .from(user)
-      .where(eq(user.banned, false));
+    const people = await tx.select({ id: user.id, name: user.name }).from(user).where(isStaff);
 
     let created = 0;
     let charged = 0;
@@ -794,8 +799,8 @@ export async function preparePayroll(actor: Actor, input: { period: string }) {
             amount: leave.deductFromSalary!,
             // the span, never a day count — the amount is the owner's figure
             // and may cover fewer days than the leave itself
-            note: `${LEAVE_TYPE_LABELS[leave.type as LeaveType]} · ${leave.startDate}${
-              leave.endDate === leave.startDate ? "" : ` → ${leave.endDate}`
+            note: `${LEAVE_TYPE_LABELS[leave.type as LeaveType]} · ${dayMonth(leave.startDate)}${
+              leave.endDate === leave.startDate ? "" : ` – ${dayMonth(leave.endDate)}`
             }`,
             leaveRequestId: leave.id,
             createdBy: actor.id,

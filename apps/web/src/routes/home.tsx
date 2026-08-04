@@ -1,7 +1,9 @@
+import { canAny } from "@mams/shared";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight } from "lucide-react";
 import { useMemo } from "react";
 import { Link } from "react-router";
+import { OwnerDeck } from "@/components/owner-deck";
 import { Card } from "@/components/ui/card";
 import { EmptyState, ErrorBanner, SkeletonRows } from "@/components/ui/feedback";
 import { SectionLabel } from "@/components/ui/page";
@@ -30,6 +32,11 @@ export function HomePage() {
   const work = useQuery(trpc.tasks.myWork.queryOptions());
 
   const viewer = me.data as Viewer | undefined;
+  // The person who runs the place opens on the company, not on his own three
+  // tasks — his job is regulating other people's work, so that comes first.
+  const regulates = canAny(viewer, ["tasks.approve", "hr.manage", "money.view", "team.viewAll"]);
+  // same query key as the deck below — React Query serves both from one fetch
+  const deck = useQuery({ ...trpc.dashboard.deck.queryOptions(), enabled: regulates });
   // Every destination, not the first four: on a phone the tab bar only holds
   // five, so anything missing here is unreachable for the rest of the team.
   const destinations = nav.filter((item) => item.to !== "/home");
@@ -44,12 +51,18 @@ export function HomePage() {
         <h1 className="display mt-2 text-h1 text-ink-900 sm:text-hero">
           {today ? formatLong(today) : "Today"}
         </h1>
-        {work.data && (
-          <p className="mt-2 text-lead text-ink-500">
-            {summarise(work.data.tasks as WorkTask[], work.data.today)}
-          </p>
+        {regulates ? (
+          deck.data && <p className="mt-2 text-lead text-ink-500">{summariseCompany(deck.data)}</p>
+        ) : (
+          work.data && (
+            <p className="mt-2 text-lead text-ink-500">
+              {summarise(work.data.tasks as WorkTask[], work.data.today)}
+            </p>
+          )
         )}
       </header>
+
+      {regulates && <OwnerDeck />}
 
       <nav className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 sm:gap-3">
         {destinations.map((item) => (
@@ -73,9 +86,14 @@ export function HomePage() {
         </Card>
       ) : work.isError ? (
         <ErrorBanner message="Your work didn't load." onRetry={() => work.refetch()} />
-      ) : (
-        <UpNext today={work.data.today} tasks={work.data.tasks as WorkTask[]} viewer={viewer!} />
-      )}
+      ) : work.data.tasks.length > 0 || !regulates ? (
+        <UpNext
+          today={work.data.today}
+          tasks={work.data.tasks as WorkTask[]}
+          viewer={viewer!}
+          heading={regulates ? "Your own work" : "The next two weeks"}
+        />
+      ) : null}
     </div>
   );
 }
@@ -90,6 +108,25 @@ const DESTINATION_HINTS: Record<string, string> = {
   "/people": "Requests, balances & payroll",
   "/settings/users": "Team, roles & permissions",
 };
+
+/**
+ * The same sentence for the person running the place — about the company, not
+ * about his own three tasks. What is stuck on him comes first, because that is
+ * the only part of the day nobody else can move.
+ */
+function summariseCompany(deck: {
+  needs: { approvals: unknown[]; leave: unknown[]; claims: unknown[] };
+  floor: { late: unknown[]; today: unknown[] } | null;
+  away: { today: unknown[] };
+}): string {
+  const waiting = deck.needs.approvals.length + deck.needs.leave.length + deck.needs.claims.length;
+  const parts: string[] = [];
+  if (waiting > 0) parts.push(`${waiting} need${waiting === 1 ? "s" : ""} you`);
+  if (deck.floor && deck.floor.late.length > 0) parts.push(`${deck.floor.late.length} late`);
+  if (deck.floor && deck.floor.today.length > 0) parts.push(`${deck.floor.today.length} running today`);
+  if (deck.away.today.length > 0) parts.push(`${deck.away.today.length} off`);
+  return parts.length === 0 ? "Nothing needs you — the floor is clear." : `${parts.join(" · ")}.`;
+}
 
 /** One honest sentence about the day, in the order a person would say it. */
 function summarise(tasks: WorkTask[], today: string): string {
@@ -110,7 +147,17 @@ function summarise(tasks: WorkTask[], today: string): string {
   return `${parts.join(" · ")}.`;
 }
 
-function UpNext({ today, tasks, viewer }: { today: string; tasks: WorkTask[]; viewer: Viewer }) {
+function UpNext({
+  today,
+  tasks,
+  viewer,
+  heading = "The next two weeks",
+}: {
+  today: string;
+  tasks: WorkTask[];
+  viewer: Viewer;
+  heading?: string;
+}) {
   const open = tasks.filter((t) => t.status !== "done");
   const weekEnd = addDaysISO(today, 7);
 
@@ -144,7 +191,7 @@ function UpNext({ today, tasks, viewer }: { today: string; tasks: WorkTask[]; vi
   return (
     <section className="space-y-6">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="display text-title text-ink-900">The next two weeks</h2>
+        <h2 className="display text-title text-ink-900">{heading}</h2>
         <Link
           to="/calendar"
           className="inline-flex items-center gap-1.5 text-small font-medium text-ink-500 transition-colors hover:text-ink-900"

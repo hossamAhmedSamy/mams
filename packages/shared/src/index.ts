@@ -257,7 +257,7 @@ export const ADJUSTMENT_LABELS: Record<AdjustmentKind, string> = {
   bonus: "Bonus",
   deduction: "Deduction",
   advance: "Advance taken",
-  leave_deduction: "Unpaid days",
+  leave_deduction: "Days off",
 };
 
 export function adjustmentSign(kind: AdjustmentKind): 1 | -1 {
@@ -285,6 +285,15 @@ export const PAYROLL_DAYS_IN_MONTH = 30;
 
 export function dailyRate(monthlyAmount: number | string): number {
   return Math.round((Number(monthlyAmount) / PAYROLL_DAYS_IN_MONTH) * 100) / 100;
+}
+
+/** "14 Sep" — for text the API writes and a person reads (payslip lines). */
+export function dayMonth(dateISO: string): string {
+  return new Date(`${dateISO}T00:00:00Z`).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  });
 }
 
 /** "August 2026" from a YYYY-MM period. */

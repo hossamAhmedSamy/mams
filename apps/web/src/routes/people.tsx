@@ -7,6 +7,7 @@ import {
   LEAVE_TYPES,
   LEAVE_TYPE_LABELS,
   leaveDays,
+  periodLabel,
 } from "@mams/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarPlus, Check, SlidersHorizontal, Trash2, X } from "lucide-react";
@@ -17,10 +18,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox, Field, Input, Select, Textarea } from "@/components/ui/input";
-import { EmptyState, ErrorBanner, SkeletonRows } from "@/components/ui/feedback";
+import { ErrorBanner, SkeletonRows } from "@/components/ui/feedback";
 import { Modal } from "@/components/ui/modal";
 import { Avatar, PageHeader, SectionLabel } from "@/components/ui/page";
-import { formatShort, todayISO } from "@/lib/dates";
+import { todayISO } from "@/lib/dates";
 import { useTRPC } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { PayrollSection } from "./payroll";
@@ -199,11 +200,18 @@ function PendingRow({ req }: { req: PendingLeave }) {
           ) : (
             "Unpaid leave — no balance involved"
           )}
-          {req.daysBeyondBalance > 0 && (
+          {/* "beyond it" only means something when there is an "it" */}
+          {pool && req.daysBeyondBalance > 0 && (
             <span className="text-late">
               {" · "}
               <span className="font-mono">{req.daysBeyondBalance}</span> day
               {req.daysBeyondBalance === 1 ? "" : "s"} beyond it
+            </span>
+          )}
+          {!pool && req.suggestedDeduction > 0 && (
+            <span>
+              {" · "}worth <span className="font-mono">{formatMoney(req.suggestedDeduction)}</span>{" "}
+              in pay
             </span>
           )}
         </p>
@@ -329,7 +337,8 @@ function DecideModal({
                           {req.daysBeyondBalance === 1 ? "" : "s"} past the balance
                         </>
                       )}
-                      . It lands on {req.startDate.slice(0, 7)}'s payslip when you prepare payroll.
+                      . It lands on the {periodLabel(req.startDate.slice(0, 7))} payslip when you
+                      prepare payroll.
                     </>
                   ) : (
                     "No salary is set for this person yet — set one in Payroll first."

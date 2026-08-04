@@ -379,35 +379,39 @@ projects:     (client_id), (status)
 
 ### 2.3 Seed data
 
-**Skills:** Videographer · Photographer · Editor · Designer · Copywriter · Creative · Account Manager
+Revised with the owner (2026-08-02): the agency runs **one** shape of work, so the
+reference data is that shape and nothing else. A menu of workflows nobody chooses
+between is a decision the portal asks for and never uses.
+
+**Skills:** Videographer · Photographer · Editor
 
 **Stages** (name → qualifying skills → default duration → reminder rule):
 
 | Stage | Qualifying skills | Days | Reminder rule |
 |---|---|---|---|
-| Concept / Script | Creative, Copywriter | 2 | none |
-| Content Copy | Copywriter | 2 | none |
-| Shooting | Videographer, Photographer | 2 | **end_of_last_day** |
+| Shooting | Videographer, Photographer | 1 | **end_of_last_day** |
 | Editing | Editor | 3 | none |
-| Retouching | Editor | 2 | none |
-| Design | Designer | 3 | none |
-| Delivery | Account Manager | 1 | none |
 
-**Templates:**
+**Template:**
 
 | Template | Chain |
 |---|---|
-| Reels / Video | Concept / Script → Shooting → Editing → Delivery |
-| Photo | Concept / Script → Shooting → Retouching → Delivery |
-| Design | Content Copy → Design → Delivery |
+| Campaign | Shooting → **Editing (requires approval)** |
 
-(“Custom” is not a template row — it's the ad-hoc path: a project with no template whose
-tasks the admin creates by hand.)
+Every campaign is that chain. The approval flag on Editing is the owner's control point:
+the edit comes back to him before the campaign counts as delivered — which is what makes
+this a work regulator rather than a list. ("Custom" is not a template row — it's the ad-hoc
+path: a project with no template whose tasks are created by hand.)
 
-**Expense categories:** Equipment rental · Transport · Talent · Location · Freelancer fees · Props · Other
+The engine itself stays a general chain machine; the four-stage fixture the handoff tests
+need lives in `apps/api/src/test/fixtures.ts`, not in the shipped seed.
 
-**Users:** Adham (admin; skills: Account Manager) + Hazem, Gandoz, Sama, Amer (members,
-skills assigned in the settings UI after first login — the sheet doesn't say who does what).
+**Expense categories:** Salaries · Equipment rental · Transport · Talent · Location ·
+Freelancer fees · Props · Other
+
+**Users:** the owner (admin — every permission implicitly, no salary, no leave balance) and
+the crew (members, each with their skills; grants added per person in Settings). See
+`pnpm --filter @mams/api seed:demo` for a full working week of this shape.
 
 ---
 
@@ -437,6 +441,11 @@ Two roles only. Enforced twice: at the tRPC procedure level (`adminProcedure` /
 | Reminders / notifications: receive & mark read | ✔ | ✔ (own) |
 | Expenses / incomes / categories: everything | ✔ | ✖ (members never see money) |
 | Finance reports | ✔ | ✖ |
+| Time off: request own, withdraw own pending, see own balance | ✔ | ✔ (own only) |
+| Time off: decide requests, log leave for others, set allowances | ✔ / `hr.manage` | ✖ |
+| Who is off (names + dates, no reasons) | ✔ | ✔ (shared calendar) |
+| Salaries & payroll: set pay, prepare, adjust, mark paid | ✔ / `hr.manage` | ✖ |
+| Own salary + own **paid** payslips | ✔ | ✔ (own only; drafts stay with the owner) |
 | Activity log: view | ✔ | ✔ ⁽ᵒ⁾ only on tasks they can see (i.e., all tasks; but no finance entries) |
 | Settings: skills, stages, templates, defaults | ✔ | ✖ |
 | CSV import | ✔ | ✖ |
@@ -789,7 +798,25 @@ not scaffolded.
 - Comments thread (all users) with @-free simplicity — plain text, newest last.
 - Activity sub-list (transitions, handoffs, deadline changes).
 
-**Admin Dashboard** *(Adham's landing page; must work on a phone)*
+**Home — the owner's deck** *(built 2026-08-02; `dashboard.deck`)*
+
+Home is one route for everyone, but it answers a different question depending on who opens
+it. A crew member's day is their own tasks. The owner's day is other people's work, so his
+Home leads with the company and puts his own tasks last:
+
+1. **Waiting on you** — one list, three kinds of thing, in the order they block others:
+   edits to approve, time-off requests, expense claims. An approval is a button *here*
+   (two seconds, no context needed); anything with money or a leave balance behind it links
+   to the screen that shows the whole picture.
+2. **On the floor** — Late · Running today · Nobody on it · Campaigns live, each a link into
+   the filtered list, followed by the late and today rows themselves.
+3. **Who's away** and **This month** (in / out / net) side by side.
+
+Every block is permission-gated server-side (`tasks.approve`, `hr.manage`, `money.*`,
+`team.viewAll`), so granting one slice of authority to a member shows them that slice only.
+The deck is skipped entirely for someone holding none of them.
+
+**Admin Dashboard — earlier spec, superseded in part by the deck above**
 - Four stat tiles: **Overdue · Due this week · Unassigned · Flagged** — each tappable,
   expands the corresponding list below (task rows with quick actions: assign via dropdown,
   bump deadline, open).
@@ -837,6 +864,9 @@ listed.
 | 9 | Project auto-completed | admin | Digest (in-app immediate) | "<project> is complete 🎉" |
 | 10 | Comment on a task you're assigned to / you authored | that user | Digest | "<person> commented on <task>" |
 | 11 | Daily digest 08:30 Cairo (skipped when empty) | each user | Email | "Today: N due, M overdue" + sections; admin version adds unassigned + flags + yesterday's completions |
+| 12 | Time off requested | everyone with `hr.manage` | **Immediate** | "<person> asks for N days off" + type, span, reason |
+| 13 | Time off decided (or logged for you) | requester | **Immediate** | "N days off approved ✓" / "…was rejected" + note + any pay deduction |
+| 14 | Payslip paid | that person | **Immediate** | "<month> salary paid — <net>" |
 
 Rules: no notification for one's own actions; dedupe #4 per task/day; email failures log +
 retry once, in-app row is the source of truth.
@@ -991,3 +1021,59 @@ budget) · Google Calendar sync (v1.5) · embedded AI chat.
    Nothing is bought before then.
 4. v1.5 candidates when v1 is trusted: Google Calendar sync, WhatsApp alerts (budget check),
    MCP write tools, embedded chat.
+
+---
+
+## 13. Mini HR — time off and pay
+
+Owner request (2026-08-02): "a small part of the system handles the HR… members request
+leaves, Adham accepts or rejects with a note… and handles all the salaries", with one screen
+for the team and one for him. Two halves that meet in exactly one place: a day off that costs
+money becomes a line on that month's payslip.
+
+### 13.1 Rules (decided with the owner)
+
+| Question | Answer |
+|---|---|
+| Leave types | `annual`, `casual`, `sick`, `unpaid` — a fixed set, not configurable |
+| Allowance | 21 annual days a year; casual (7) comes **out of the same 21**; sick (15) is its own pool; unpaid draws on neither. Overridable per person per year |
+| Day counting | Plain inclusive calendar days between the two dates. **No** weekend or public-holiday arithmetic — the owner asked for a number he can check in his head |
+| What a balance counts | Approved days only. A pending request reserves nothing |
+| Year attribution | A leave belongs to the year it **starts** in, whole — never split across two balances |
+| Over-balance requests | Allowed, never blocked. The queue shows how many days are past the balance and what they are worth |
+| Salary deduction | The owner's lever on any approval (and on any leave he logs himself): an amount that lands on that month's payslip. Defaults to `daily rate × days past the balance`; unpaid leave defaults to the full span |
+| Daily rate | `monthly ÷ 30` — the Egyptian payroll convention |
+| Pay privacy | A member sees their own salary and their own **paid** payslips. Drafts are the owner's working copy and never leave his screen |
+| Overlaps | Two overlapping requests for the same person are refused — they would double-count the same day |
+
+### 13.2 Tables (`packages/db/src/schema/hr.ts`)
+
+| Table | Purpose | Notes |
+|---|---|---|
+| `leave_requests` | one continuous stretch of days | `days` is **stored**, so a decided request keeps the number it was decided on; `deduct_from_salary` holds the owner's amount until payroll materializes it |
+| `leave_allowances` | per user per year | a missing row = the defaults in `@mams/shared`; nobody needs setting up before they can ask for a day |
+| `salaries` | pay history, not one mutable figure | a raise is a new `(user, effective_from)` row, so an old payslip is always explainable |
+| `payslips` | one month, one person | unique `(user, period)`; drafts are editable, `paid` is frozen and carries the `expense_id` it posted |
+| `payroll_adjustments` | everything moving a payslip off its base | positive amounts; `bonus` adds, the rest subtract; unique `(payslip, leave_request)` is what makes preparing payroll twice harmless |
+
+### 13.3 Payroll flow
+
+1. **Prepare** (`hr.preparePayroll`) — a draft payslip per active person with a salary in
+   force on the last day of the month, plus a `leave_deduction` line for every approved leave
+   starting that month that the owner marked deductible. Idempotent: existing drafts keep
+   their edits, paid slips are skipped, no leave is charged twice.
+2. **Adjust** — bonus / deduction / advance lines; net recomputes on every change and can
+   never go below zero.
+3. **Pay** (`hr.markPaid`) — the single point where HR touches the books: the net posts as an
+   approved overhead expense under the **Salaries** category, dated the payment day, and the
+   payslip keeps that expense's id. This is why setting a salary **pauses** any legacy
+   recurring "salary" line for the same person — two systems posting one wage would silently
+   double the books.
+
+### 13.4 Screens
+
+| Screen | Who | What |
+|---|---|---|
+| `/time-off` — "Time off & pay" | everyone | three balance meters, request form (live day count + over-balance warning), own requests with decision notes and any deduction, own salary + paid payslips with their lines |
+| `/people` — "People" | `hr.manage` | **Time off** tab: the approval queue (each row carries the person's balance, the days past it and a pre-filled deduction), the team's year with per-person balances, "log leave" and allowance overrides; **Payroll** tab: month switcher, prepare, per-person lines, pay, and the standing salary list |
+| Calendar | everyone | approved leave drawn as absence — dashed and colourless, so it reads as "nobody here" instead of competing with deadline colour |

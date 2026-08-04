@@ -25,6 +25,27 @@ SEED_ADMIN_EMAIL=you@example.com SEED_ADMIN_PASSWORD=some-temp-pass-123 \
 pnpm dev            # api on :8080, web on :5173 (proxies /trpc + /api to the api)
 ```
 
+### Demo data
+
+To see the portal with a working week in it — five campaigns spread across the
+Shooting → Editing chain, an edit waiting to be approved, two leave requests, two expense
+claims, last month's payroll paid:
+
+```bash
+pnpm --filter @mams/api seed:demo   # WIPES the database, then refills it
+```
+
+Everyone signs in with `mams-demo-2026` (override with `DEMO_PASSWORD`):
+
+| Account | Who |
+|---|---|
+| `adham@mams.local` | the owner — approves, decides, pays; not on his own payroll |
+| `hazem@mams.local` | videographer, team lead (`team.viewAll`, `tasks.assign`) |
+| `sama@mams.local` | photographer |
+| `youssef@mams.local` · `mariam@mams.local` | editors |
+
+The script refuses to run against a non-local `DATABASE_URL` unless `DEMO_FORCE=1`.
+
 Open http://localhost:5173 and sign in. Admin creates all other accounts in
 Settings → Team (no public signup exists, by design).
 

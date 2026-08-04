@@ -5,6 +5,7 @@ import { createDb } from "@mams/db";
 import { seedDomain } from "@mams/db/seed-data";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
+import { seedTestWorkflow } from "./fixtures";
 
 export default async function setup() {
   const admin = new pg.Client({
@@ -22,5 +23,7 @@ export default async function setup() {
   );
   await migrate(db, { migrationsFolder });
   await seedDomain(db);
+  await seedTestWorkflow(db); // the deeper chain the engine tests need
+
   await (db.$client as pg.Pool).end();
 }

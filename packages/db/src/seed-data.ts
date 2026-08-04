@@ -14,15 +14,13 @@ import {
   workflowTemplates,
 } from "./schema/index";
 
-const SKILLS = [
-  "Videographer",
-  "Photographer",
-  "Editor",
-  "Designer",
-  "Copywriter",
-  "Creative",
-  "Account Manager",
-] as const;
+/**
+ * The agency runs one shape of work (owner, 2026-08-02): a campaign is shot,
+ * then it is edited, and the owner signs the edit off. Everything else the
+ * team does hangs off those two stages, so the reference data is exactly that
+ * chain — not a menu of workflows nobody picks between.
+ */
+const SKILLS = ["Videographer", "Photographer", "Editor"] as const;
 
 const STAGES: {
   name: string;
@@ -30,19 +28,20 @@ const STAGES: {
   days: number;
   reminderRule: "none" | "end_of_last_day";
 }[] = [
-  { name: "Concept / Script", skills: ["Creative", "Copywriter"], days: 2, reminderRule: "none" },
-  { name: "Content Copy", skills: ["Copywriter"], days: 2, reminderRule: "none" },
-  { name: "Shooting", skills: ["Videographer", "Photographer"], days: 2, reminderRule: "end_of_last_day" },
+  // a shoot is a day on location; the reminder lands when that day ends
+  { name: "Shooting", skills: ["Videographer", "Photographer"], days: 1, reminderRule: "end_of_last_day" },
   { name: "Editing", skills: ["Editor"], days: 3, reminderRule: "none" },
-  { name: "Retouching", skills: ["Editor"], days: 2, reminderRule: "none" },
-  { name: "Design", skills: ["Designer"], days: 3, reminderRule: "none" },
-  { name: "Delivery", skills: ["Account Manager"], days: 1, reminderRule: "none" },
 ];
 
-const TEMPLATES: { name: string; chain: string[] }[] = [
-  { name: "Reels / Video", chain: ["Concept / Script", "Shooting", "Editing", "Delivery"] },
-  { name: "Photo", chain: ["Concept / Script", "Shooting", "Retouching", "Delivery"] },
-  { name: "Design", chain: ["Content Copy", "Design", "Delivery"] },
+/**
+ * `approve` marks the stage that comes back to the owner before it counts as
+ * done — the control point that makes this a work regulator rather than a list.
+ */
+const TEMPLATES: { name: string; chain: { stage: string; approve?: boolean }[] }[] = [
+  {
+    name: "Campaign",
+    chain: [{ stage: "Shooting" }, { stage: "Editing", approve: true }],
+  },
 ];
 
 const EXPENSE_CATEGORIES = [
@@ -102,10 +101,15 @@ export async function seedDomain(db: Db) {
       .from(workflowTemplates)
       .where(eq(workflowTemplates.name, t.name));
     if (!tpl) throw new Error(`seed: template ${t.name} not found after insert`);
-    for (const [i, stageName] of t.chain.entries()) {
+    for (const [i, step] of t.chain.entries()) {
       await db
         .insert(templateStages)
-        .values({ templateId: tpl.id, stageId: stageIdByName(stageName), position: i + 1 })
+        .values({
+          templateId: tpl.id,
+          stageId: stageIdByName(step.stage),
+          position: i + 1,
+          requiresApproval: step.approve ?? false,
+        })
         .onConflictDoNothing();
     }
   }
